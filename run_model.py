@@ -1,6 +1,5 @@
 from flow_model import FlowModel, model_forward, shift_density, gen_samples
 from flow_model_training import Datatuple, process_data, gen_d_matrix, loss_fn, train_model
-from plots import line_plot, plot_densities
 
 import os
 import pickle
