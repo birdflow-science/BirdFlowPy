@@ -3,7 +3,6 @@ import haiku as hk
 from jax.nn import softmax
 import jax.numpy as jnp
 from jax.random import categorical
-from jax.ops import index, index_update
 
 
 class InitialLoc(hk.Module):
@@ -119,7 +118,7 @@ def shift_density(pred_density, nan_mask, x_dim, y_dim):
     full_densities = []
     for p in pred_density:
         full_cells = jnp.full((x_dim * y_dim,), jnp.nan)
-        full_cells = index_update(full_cells, ~nan_mask, p)
+        full_cells = full_cells.at[~nan_mask].set(p)
         full_densities.append(full_cells)
 
     return jnp.array(full_densities)
@@ -141,5 +140,5 @@ def aggregate_samples(sample_arr, weeks, cells):
         weekly_samples = sample_arr[:, week]
         positions, counts = jnp.unique(weekly_samples, return_counts=True)
         for pos, count in zip(positions, counts):
-            sampled_density = index_update(sampled_density, index[week, pos], count / n)
+            sampled_density = sampled_density.at[week, pos].set(count / n)
     return sampled_density
