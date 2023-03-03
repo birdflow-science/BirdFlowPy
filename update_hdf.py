@@ -5,10 +5,10 @@ import os
 import pickle
 from functools import partial
 import argparse
+import h5py
+from datetime import datetime
 
 import numpy as np
-import h5py
-
 import optax
 import haiku as hk
 import jax.numpy as jnp
@@ -86,5 +86,13 @@ for week in range(t_start, t_end):
     flow_amounts.append(flow)
     d = flow.sum(axis=0)
     
-file.create_dataset('marginals', data = flow_amounts)
+file.create_dataset('marginals', data=flow_amounts)
+file.create_dataset("date", data=str(datetime.today()))
+file.create_dataset('obs_weight', data=args.obs_weight)
+file.create_dataset('ent_weight', data=args.ent_weight)
+file.create_dataset('dist_weight', data=args.dist_weight)
+file.create_dataset('dist_pow', data=args.dist_pow)
+file.create_dataset('learning_rate', data=args.learning_rate)
+file.create_dataset('training_steps', data=args.training_steps)
+file.create_dataset('rng_seed', data=args.rng_seed)
 file.close() 
