@@ -2,6 +2,7 @@ from flow_model import FlowModel, model_forward
 from flow_model_training import Datatuple, gen_d_matrix, loss_fn, train_model
 
 import os
+import shutil
 import pickle
 from functools import partial
 import argparse
@@ -31,7 +32,12 @@ args = parser.parse_args()
 
 print(str(args))
 
-file = h5py.File(os.path.join(args.root, f'{args.species}_2021_{args.resolution}km.hdf5'), 'r+')
+hdf_src = os.path.join(args.root, f'{args.species}_2021_{args.resolution}km.hdf5')
+hdf_dst = os.path.join(args.root, f'{args.species}_2021_{args.resolution}km_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}_pow{args.dist_pow}.hdf5')
+
+shutil.copyfile(hdf_src, hdf_dst)
+
+file = h5py.File(hdf_dst, 'r+')
 
 true_densities = np.asarray(file['distr']).T
 
@@ -68,7 +74,7 @@ params, loss_dict = train_model(loss_fn,
                                 dtuple.weeks,
                                 key)
 
-with open(os.path.join(args.root, f'{args.species}_params_{args.resolution}.pkl'), 'wb') as f:
+with open(os.path.join(args.root, f'{args.species}_params_{args.resolution}_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}_pow{args.dist_pow}.pkl'), 'wb') as f:
      pickle.dump(params, f)
         
 t_start = 1
@@ -87,12 +93,16 @@ for week in range(t_start, t_end):
     d = flow.sum(axis=0)
     
 file.create_dataset('marginals', data=flow_amounts)
-file.create_dataset("date", data=str(datetime.today()))
-file.create_dataset('obs_weight', data=args.obs_weight)
-file.create_dataset('ent_weight', data=args.ent_weight)
-file.create_dataset('dist_weight', data=args.dist_weight)
-file.create_dataset('dist_pow', data=args.dist_pow)
-file.create_dataset('learning_rate', data=args.learning_rate)
-file.create_dataset('training_steps', data=args.training_steps)
-file.create_dataset('rng_seed', data=args.rng_seed)
+del file['metadata/birdflow_model_date'] 
+file.create_dataset('metadata/birdflow_model_date', data=str(datetime.today()))
+
+hyper = file.create_group("metadata/hyperparameters")
+hyper.create_dataset('obs_weight', data=args.obs_weight)
+hyper.create_dataset('ent_weight', data=args.ent_weight)
+hyper.create_dataset('dist_weight', data=args.dist_weight)
+hyper.create_dataset('dist_pow', data=args.dist_pow)
+hyper.create_dataset('learning_rate', data=args.learning_rate)
+hyper.create_dataset('training_steps', data=args.training_steps)
+hyper.create_dataset('rng_seed', data=args.rng_seed)
+
 file.close() 
