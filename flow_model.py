@@ -22,19 +22,20 @@ class InitialLoc(hk.Module):
 
 
 class FlowBlock(hk.Module):
-    def __init__(self, num_cells, week_num=None):
+    def __init__(self, cells1, cells2, week_num=None):
         if week_num:
             name = f'Week_{week_num}'
         else:
             name = 'transition_block'
         super().__init__(name=name)
-        self.num_cells = num_cells
+        self.cells1 = cells1
+        self.cells2 = cells2
         
         
     def __call__(self, last_week):
         z = hk.get_parameter(
             'z',
-            (self.num_cells, self.num_cells),
+            (self.cells1, self.cells2),
             init=hk.initializers.RandomNormal(),
             dtype = 'float32'
         )
@@ -52,14 +53,14 @@ class FlowModel(hk.Module):
         
         
     def __call__(self):
-        d0 = InitialLoc(self.cells)()
+        d0 = InitialLoc(self.cells[0])()
         d = d0
         flow_amounts = []
         for week in range(self.num_weeks - 1):
-            flow = FlowBlock(self.cells, week_num=week + 1)(d)
+            flow = FlowBlock(self.cells[week], self.cells[week + 1], week_num=week + 1)(d)
             flow_amounts.append(flow)
             d = flow.sum(axis=0)
-        return (d0, jnp.array(flow_amounts))
+        return (d0, flow_amounts)
 
 def predict(cells, weeks):
     model = FlowModel(cells, weeks)
