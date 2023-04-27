@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from jax import jit, value_and_grad, vmap
 from scipy.spatial.distance import pdist, squareform
 
-Datatuple = namedtuple('Datatuple', ['weeks', 'x_dim', 'y_dim', 'cells', 'nan_mask'])
+Datatuple = namedtuple('Datatuple', ['weeks', 'cells', 'distances', 'masks'])
 
 def process_data(data_array):
     weeks, y_dim, x_dim = data_array.shape
@@ -25,43 +25,58 @@ def process_data(data_array):
     dtuple = Datatuple(weeks, x_dim, y_dim, cells, nans)
     return density, dtuple
 
-def gen_d_matrix(xdim, ydim, nan_mask):
-    x = jnp.linspace(0, xdim - 1, xdim)
-    y = jnp.linspace(0, ydim - 1, ydim)
-    xs, ys = jnp.meshgrid(x, y)
-    xs = xs.flatten()
-    ys = ys.flatten()
-    coordinates = jnp.concatenate((xs, ys)).reshape((-1, 2), order='F')
-    masked_coordinates = coordinates[~nan_mask]
-    return squareform(pdist(masked_coordinates))
+
+def mask_input(true_densities, dtuple):
+    distance_matrix = jnp.zeros((dtuple.cells, dtuple.cells))
+    distance_matrix = distance_matrix.at[jnp.triu_indices(dtuple.cells, k=1)].set(dtuple.distances)
+    distance_matrix = distance_matrix + distance_matrix.T
+
+    distance_matrices = []
+    for i in range(0, dtuple.weeks - 1):
+        distance_matrices.append(distance_matrix[dtuple.masks[i], :][:, dtuple.masks[i + 1]])
+
+    masked_densities = []
+    for density, mask in zip(true_densities, dtuple.masks):
+        masked_densities.append(density[mask])
+        
+    return distance_matrices, masked_densities
     
 def obs_loss(pred_densities, true_densities):
-    residual = true_densities - pred_densities
-    return jnp.sum(jnp.square(residual))
+    obs = 0
+    for pred, true in zip(pred_densities, true_densities):
+        residual = true - pred
+        obs += jnp.sum(jnp.square(residual))
+    return obs
 
-def distance_loss(flows, d_matrix):
-    return jnp.sum(flows * d_matrix)
-  
+def distance_loss(flows, d_matrices):
+    dist = 0
+    for flow, d_matrix in zip(flows, d_matrices):
+        dist += jnp.sum(flow * d_matrix)
+    return dist
+
 def entropy(probs):
     logp = jnp.log(probs)
     ent = probs * logp
     h = -1 * jnp.sum(ent)
     return h
-  
-vec_entropy = vmap(entropy)
 
-def joint_entropy(joints, marginals):
-    return jnp.sum(vec_entropy(joints)) - jnp.sum(vec_entropy(marginals[1:-1]))
+def ent_loss(probs, flows):
+    ent = 0
+    for p in probs:
+        ent += entropy(p)
+    for f in flows:
+        ent -= entropy(f)
+    return ent
 
-def loss_fn(params, true_densities, d_matrix, obs_weight, dist_weight, ent_weight):
-    weeks, cells = true_densities.shape[0], true_densities.shape[1]
+def loss_fn(params, cells, true_densities, d_matrices, obs_weight, dist_weight, ent_weight):
+    weeks = len(true_densities)
     pred = model_forward.apply(params, None, cells, weeks)
     d0, flows = pred
-    pred_densities = jnp.array([d0] + [jnp.sum(flow, axis=0) for flow in flows])
+    pred_densities = [d0] + [jnp.sum(flow, axis=0) for flow in flows]
     
     obs = obs_loss(pred_densities, true_densities)
-    dist = distance_loss(flows, d_matrix)
-    ent = joint_entropy(flows, pred_densities)
+    dist = distance_loss(flows, d_matrices)
+    ent = ent_loss(flows, pred_densities)
     
     return (obs_weight * obs) + (dist_weight * dist) + (-1 * ent_weight * ent), (obs, dist, ent)
 
