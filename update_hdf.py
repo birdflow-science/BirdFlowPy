@@ -21,9 +21,10 @@ parser.add_argument('root', type=str, help='hdf root directory')
 parser.add_argument('species', type=str, help='species name')
 parser.add_argument('resolution', type=int, help='model resolution')
 parser.add_argument('--obs_weight', help='Weight on the observation term of the loss', default=1.0, type=float)
-parser.add_argument('--dist_weight', help='Weight on the distance penalty in the loss', default=1e-4, type=float)
+parser.add_argument('--dist_weight', help='Weight on the distance penalty in the loss', default=1e-2, type=float)
 parser.add_argument('--ent_weight', help='Weight on the joint entropy of the model', default=1e-4, type=float)
 parser.add_argument('--dist_pow', help='The exponent of the distance penalty', default=0.4, type=float)
+parser.add_argument("--dont_normalize", action="store_true", help="don't normalize distance matrix")
 parser.add_argument('--learning_rate', help='Learning rate for Adam optimizer', default=0.1, type=float)
 parser.add_argument('--training_steps', help='The number of training iterations', default=600, type=int)
 parser.add_argument('--rng_seed', help='Random number generator seed', default=17, type=int)
@@ -44,6 +45,8 @@ weeks = true_densities.shape[0]
 total_cells = true_densities.shape[1]
 
 distance_vector = np.asarray(file['distances'])**args.dist_pow
+if not args.dont_normalize:
+    distance_vector *= 1 / (100**args.dist_pow)
 masks = np.asarray(file['geom']['dynamic_mask']).T.astype(bool)
 
 dtuple = Datatuple(weeks, total_cells, distance_vector, masks)
@@ -93,6 +96,8 @@ margs = file.create_group('marginals')
 for i, f in enumerate(flow_amounts):
     margs.create_dataset(f'Week{i+1}_to_{i+2}', data=f)
 
+del file['distances']
+    
 del file['metadata/birdflow_model_date'] 
 file.create_dataset('metadata/birdflow_model_date', data=str(datetime.today()))
 
