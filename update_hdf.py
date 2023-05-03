@@ -28,6 +28,7 @@ parser.add_argument("--dont_normalize", action="store_true", help="don't normali
 parser.add_argument('--learning_rate', help='Learning rate for Adam optimizer', default=0.1, type=float)
 parser.add_argument('--training_steps', help='The number of training iterations', default=600, type=int)
 parser.add_argument('--rng_seed', help='Random number generator seed', default=17, type=int)
+parser.add_argument('--save_pkl', help='Save parameters as pickle file', action='store_true')
 
 args = parser.parse_args()
 print(str(args))
@@ -74,8 +75,9 @@ params, loss_dict = train_model(loss_fn,
                                 dtuple.weeks,
                                 key)
 
-with open(os.path.join(args.root, f'{args.species}_params_{args.resolution}_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}_pow{args.dist_pow}.pkl'), 'wb') as f:
-    pickle.dump(params, f)
+if args.save_pkl:
+    with open(os.path.join(args.root, f'{args.species}_params_{args.resolution}_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}_pow{args.dist_pow}.pkl'), 'wb') as f:
+        pickle.dump(params, f)
 
 t_start = 1
 t_end = len(params) # zero indexing in range and extra item cancel each other out
