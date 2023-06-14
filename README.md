@@ -4,7 +4,7 @@ Birdflow is a modeling framework for estimating individual movement trajectories
 
 ## Description
 
-This codebase allows for the gpu-accelerated training and use of Birdflow models in python and gives an example of how to process an abundnce estimate so that it can be used with Birdflow. For a more in depth discussion of the model and experimental results for 11 species in North America, see our preprint [here](https://www.biorxiv.org/content/10.1101/2022.04.12.488057v1).
+This codebase allows for the gpu-accelerated training and use of Birdflow models in python and gives an example of how to process an abundnce estimate so that it can be used with Birdflow. For a more in depth discussion of the model and experimental results for 11 species in North America, see our paper [here]([https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/2041-210X.14052]).
 
 ## Getting Started
 
