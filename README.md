@@ -1,4 +1,4 @@
-# Bridflow
+# BirdFlow
 
 Birdflow is a modeling framework for estimating individual movement trajectories from population level data. The model takes in eBird Status & Trends abundance estimates and proxy for energetic cost and outputs a time heterogeneous Markov chain which estimates the track distribution of the given species.
 
