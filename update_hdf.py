@@ -29,12 +29,13 @@ parser.add_argument('--learning_rate', help='Learning rate for Adam optimizer', 
 parser.add_argument('--training_steps', help='The number of training iterations', default=600, type=int)
 parser.add_argument('--rng_seed', help='Random number generator seed', default=17, type=int)
 parser.add_argument('--save_pkl', help='Save parameters as pickle file', action='store_true')
+parser.add_argument("--ebirdst_year", help="ebirdst version year for filename construction", default=2021, type=int)
 
 args = parser.parse_args()
 print(str(args))
 
-hdf_src = os.path.join(args.root, f'{args.species}_2021_{args.resolution}km.hdf5')
-hdf_dst = os.path.join(args.root, f'{args.species}_2021_{args.resolution}km_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}_pow{args.dist_pow}.hdf5')
+hdf_src = os.path.join(args.root, f'{args.species}_{args.ebirdst_year}_{args.resolution}km.hdf5')
+hdf_dst = os.path.join(args.root, f'{args.species}_{args.ebirdst_year}_{args.resolution}km_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}_pow{args.dist_pow}.hdf5')
 
 shutil.copyfile(hdf_src, hdf_dst)
 
