@@ -1,5 +1,11 @@
 from flow_model import FlowModel, model_forward
-from flow_model_training import Datatuple, mask_input, loss_fn, train_model
+from flow_model_training import (
+    Datatuple,
+    extra_weight_filename_suffix,
+    mask_input,
+    loss_fn,
+    train_model,
+)
 
 import os
 import shutil
@@ -35,8 +41,22 @@ parser.add_argument("--ebirdst_year", help="ebirdst version year for filename co
 args = parser.parse_args()
 print(str(args))
 
+loss_weights = {
+    'obs': args.obs_weight,
+    'dist': args.dist_weight,
+    'ent': args.ent_weight,
+    'flow_l2': args.flow_l2_weight,
+}
+loss_weight_defaults = {
+    'obs': parser.get_default('obs_weight'),
+    'dist': parser.get_default('dist_weight'),
+    'ent': parser.get_default('ent_weight'),
+    'flow_l2': parser.get_default('flow_l2_weight'),
+}
+extra_weights_suffix = extra_weight_filename_suffix(loss_weights, loss_weight_defaults)
+
 hdf_src = os.path.join(args.root, f'{args.species}_{args.ebirdst_year}_{args.resolution}km.hdf5')
-hdf_dst = os.path.join(args.root, f'{args.species}_{args.ebirdst_year}_{args.resolution}km_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}_pow{args.dist_pow}.hdf5')
+hdf_dst = os.path.join(args.root, f'{args.species}_{args.ebirdst_year}_{args.resolution}km_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}{extra_weights_suffix}_pow{args.dist_pow}.hdf5')
 
 shutil.copyfile(hdf_src, hdf_dst)
 
@@ -60,13 +80,6 @@ cells = [d.shape[0] for d in masked_densities]
 key = hk.PRNGSequence(args.rng_seed)
 optimizer = optax.adam(args.learning_rate)
 
-loss_weights = {
-    'obs': args.obs_weight,
-    'dist': args.dist_weight,
-    'ent': args.ent_weight,
-    'flow_l2': args.flow_l2_weight,
-}
-
 # Instantiate loss function
 loss_fn = jit(partial(loss_fn,
                       cells=cells,
@@ -83,7 +96,7 @@ params, loss_dict = train_model(loss_fn,
                                 key)
 
 if args.save_pkl:
-    with open(os.path.join(args.root, f'{args.species}_params_{args.resolution}_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}_pow{args.dist_pow}.pkl'), 'wb') as f:
+    with open(os.path.join(args.root, f'{args.species}_params_{args.resolution}_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}{extra_weights_suffix}_pow{args.dist_pow}.pkl'), 'wb') as f:
         pickle.dump(params, f)
 
 t_start = 1
