@@ -309,6 +309,14 @@ the Unity/`BirdFlowContainer` production environment — see
 See `dev/known-issues.md` for issues identified during development
 but deliberately deferred rather than fixed.
 
+## Versioning
+
+`_version.py` holds the single `__version__` string (PEP 440/semver;
+no `setup.py`/`pyproject.toml` to attach it to, so it's a standalone
+module rather than a package attribute). `CHANGELOG.md` follows [Keep
+a Changelog](https://keepachangelog.com/en/1.1.0/); bump `_version.py`
+and add a dated entry together when cutting a release.
+
 ## Dependencies
 
 `jax`, `haiku` (`dm-haiku`), `optax`, `scipy` (pairwise distances in the
