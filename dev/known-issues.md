@@ -59,3 +59,22 @@ surfaces typos via `argparse`'s own flag validation and the number of
 weight names is small. Worth revisiting if the registry grows to many
 more terms, or if `weights` is ever constructed somewhere other than
 `update_hdf.py`'s explicit per-flag dict literal.
+
+## Record the package version in HDF5 output metadata
+
+**Requested:** 2026-11-16, by the project owner (not a review finding).
+
+`update_hdf.py` writes a `metadata/hyperparameters` group and a
+`metadata/birdflow_model_date` field to the output HDF5, but nothing
+records which version of this codebase (`_version.py`'s `__version__`,
+added alongside `CHANGELOG.md`) produced the file. For reproducing or
+debugging an old model run — especially once loss terms/CLI flags
+start changing between versions — there's currently no way to tell
+from the HDF5 file alone which code version generated it.
+
+**Fix (not yet applied):** in `update_hdf.py`, `from _version import
+__version__` and write it as a dataset under `metadata/` (e.g.
+`metadata/birdflow_py_version`), alongside the existing
+`birdflow_model_date` write. Should also be covered by
+`tests/test_update_hdf_golden.py`'s expected-output assertions once
+added.

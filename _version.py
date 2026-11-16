@@ -6,4 +6,4 @@ convention rather than a package's __init__.py attribute. Update this
 alongside a new CHANGELOG.md entry.
 """
 
-__version__ = '1.2.0'
+__version__ = '1.1.0'
