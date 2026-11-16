@@ -72,6 +72,12 @@ def ent_loss(pred_densities, flows, true_densities, d_matrices):
         ent -= entropy(d)
     return ent
 
+def flow_l2_loss(pred_densities, flows, true_densities, d_matrices):
+    l2 = 0
+    for flow in flows:
+        l2 += jnp.sum(jnp.square(flow))
+    return l2
+
 # name -> (sign, term_fn). `sign` lets a term be rewarded (-1, like entropy,
 # which we want to maximize) or penalized (+1) without hardcoding which is
 # which in loss_fn. Adding a new loss term means adding one entry here.
@@ -79,6 +85,7 @@ LOSS_TERMS = {
     'obs': (1.0, obs_loss),
     'dist': (1.0, distance_loss),
     'ent': (-1.0, ent_loss),
+    'flow_l2': (1.0, flow_l2_loss),
 }
 
 def loss_fn(params, cells, true_densities, d_matrices, weights):

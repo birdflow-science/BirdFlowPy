@@ -28,10 +28,8 @@ RNG_SEED = 0
 LEARNING_RATE = 0.1
 
 
-def _run(small_training_fixture):
+def _run(small_training_fixture, weights):
     dtuple, d_matrices, masked_densities, cells = small_training_fixture
-
-    weights = {'obs': OBS_WEIGHT, 'dist': DIST_WEIGHT, 'ent': ENT_WEIGHT}
 
     bound_loss_fn = jit(
         partial(
@@ -51,8 +49,17 @@ def _run(small_training_fixture):
     )
 
 
+DEFAULT_WEIGHTS = {'obs': OBS_WEIGHT, 'dist': DIST_WEIGHT, 'ent': ENT_WEIGHT}
+
+# flow_l2 is always computed (it's part of LOSS_TERMS) but excluded from
+# DEFAULT_WEIGHTS here, i.e. given an implicit weight of 0.0 by loss_fn's
+# weights.get(name, 0.0) default -- this is what "off by default" means in
+# practice, and is exercised explicitly by test_flow_l2_weight_zero_is_noop
+# and test_flow_l2_nonzero_weight_changes_loss below.
+
+
 def test_golden_loss_dict(small_training_fixture):
-    _, loss_dict = _run(small_training_fixture)
+    _, loss_dict = _run(small_training_fixture, DEFAULT_WEIGHTS)
 
     expected = {
         "total": [
@@ -83,6 +90,13 @@ def test_golden_loss_dict(small_training_fixture):
             0.9226634502410889,
             0.884188175201416,
         ],
+        "flow_l2": [
+            0.262294203042984,
+            0.23182718455791473,
+            0.2154671847820282,
+            0.2072591483592987,
+            0.20536497235298157,
+        ],
     }
 
     assert loss_dict.keys() == expected.keys()
@@ -94,7 +108,7 @@ def test_golden_loss_dict(small_training_fixture):
 
 
 def test_golden_fitted_params(small_training_fixture):
-    params, _ = _run(small_training_fixture)
+    params, _ = _run(small_training_fixture, DEFAULT_WEIGHTS)
 
     z0 = params["Flow_Model/Initial_Params"]["z0"]
     expected_z0 = [
@@ -108,3 +122,26 @@ def test_golden_fitted_params(small_training_fixture):
 
     week1_z00 = float(params["Flow_Model/Week_1"]["z"][0, 0])
     assert week1_z00 == pytest.approx(-0.3869096040725708, rel=1e-5)
+
+
+def test_flow_l2_weight_zero_is_noop(small_training_fixture):
+    """flow_l2 is computed either way; explicitly weighting it at 0.0 must
+    produce identical results to omitting it from the weights dict (the
+    default-weights case above)."""
+    weights_with_explicit_zero = dict(DEFAULT_WEIGHTS, flow_l2=0.0)
+
+    _, loss_dict_default = _run(small_training_fixture, DEFAULT_WEIGHTS)
+    _, loss_dict_explicit = _run(small_training_fixture, weights_with_explicit_zero)
+
+    assert loss_dict_default["total"] == loss_dict_explicit["total"]
+
+
+def test_flow_l2_nonzero_weight_changes_loss(small_training_fixture):
+    weights_with_flow_l2 = dict(DEFAULT_WEIGHTS, flow_l2=1.0)
+
+    _, loss_dict_default = _run(small_training_fixture, DEFAULT_WEIGHTS)
+    _, loss_dict_with_term = _run(small_training_fixture, weights_with_flow_l2)
+
+    assert loss_dict_with_term["total"][0] != pytest.approx(
+        loss_dict_default["total"][0]
+    )

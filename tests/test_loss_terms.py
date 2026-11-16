@@ -3,7 +3,13 @@ import math
 import jax.numpy as jnp
 import pytest
 
-from flow_model_training import distance_loss, ent_loss, entropy, obs_loss
+from flow_model_training import (
+    distance_loss,
+    ent_loss,
+    entropy,
+    flow_l2_loss,
+    obs_loss,
+)
 
 
 def test_obs_loss_hand_calculated(tiny_densities):
@@ -46,3 +52,10 @@ def test_ent_loss_matches_manual_combination(tiny_densities, tiny_flow):
         float(entropy(p)) for p in pred_densities
     )
     assert float(result) == pytest.approx(expected)
+
+
+def test_flow_l2_loss_hand_calculated(tiny_flow):
+    flows, _ = tiny_flow
+    # 0.2^2 + 0.3^2 + 0.1^2 + 0.4^2 = 0.04 + 0.09 + 0.01 + 0.16 = 0.3
+    result = flow_l2_loss(None, flows, None, None)
+    assert float(result) == pytest.approx(0.3)
