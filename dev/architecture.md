@@ -304,7 +304,10 @@ API) before they'd run against the current code.
 Run with `.venv/bin/python -m pytest tests/` (see `requirements-dev.txt`
 for the pinned local-dev environment; this has not been verified against
 the Unity/`BirdFlowContainer` production environment — see
-`dev/workplan.md`).
+`dev/worklog.md`'s `pluggable-loss-terms` entries).
+
+See `dev/known-issues.md` for issues identified during development
+but deliberately deferred rather than fixed.
 
 ## Dependencies
 

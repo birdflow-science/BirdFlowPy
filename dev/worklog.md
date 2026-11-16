@@ -20,6 +20,47 @@ recalling history; consult the archive only if the answer isn't here.
 
 ## 2026-11-16 — branch pluggable-loss-terms
 
+### Critical review of the branch + output-filename collision fix
+
+Ran a critical review of the full `pluggable-loss-terms` diff
+(`main..pluggable-loss-terms`) looking for problems introduced by the
+refactor, re-running scenarios against the actual code rather than
+just reading the diff. Found three issues; fixed the most significant
+one, logged the other two for later triage (see
+`dev/known-issues.md`).
+
+Fixed: `update_hdf.py`'s output filename (and `--save_pkl` filename)
+only ever encoded `obs`/`ent`/`dist`/`dist_pow`, so once `flow_l2_weight`
+existed, two runs differing only in that weight produced the identical
+destination filename and silently overwrote each other via
+`shutil.copyfile` — no error, no warning. Added
+`flow_model_training.extra_weight_filename_suffix(weights)`: any
+registered loss weight other than the historic `obs`/`dist`/`ent` trio
+gets appended to the filename as `_<name><value>` whenever it's
+nonzero (matching `loss_fn`'s own `weights.get(name, 0.0)` convention
+— a zero weight has no effect on the loss, so it doesn't need to be in
+the filename). The historic three stay unconditionally embedded
+regardless of value, exactly as before, so default/historic runs
+reproduce byte-identical filenames to before this branch.
+
+Went through two iterations on the condition: first "differs from its
+CLI default" (required threading a `defaults` dict through
+`update_hdf.py`), then simplified to "nonzero" per feedback, since
+that's the more fundamental rule (matches `loss_fn`'s own treatment of
+weights) and happens to coincide with "differs from default" for every
+term today, since every non-historic term's CLI default is `0.0`.
+
+Added `tests/test_filename_suffix.py` (unit tests on the suffix logic:
+historic terms always excluded even when nonzero, non-historic terms
+included only when nonzero, multiple extras sorted by name, negative
+weights still count as nonzero) and two tests in
+`tests/test_update_hdf_golden.py`: one confirming the default run's
+filename matches the pre-existing historic pattern exactly, one
+confirming a `--flow_l2_weight 2.5` run produces a *different*
+filename from the default run rather than colliding with it (directly
+reproducing, then disproving, the original bug). Final suite: 17
+tests passing.
+
 ### Pluggable loss-term registry + flow_l2 example term
 
 Goal: make it possible to add/swap loss-function components for
