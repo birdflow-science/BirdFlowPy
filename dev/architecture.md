@@ -226,14 +226,16 @@ This is the script actually used in the current R↔Python pipeline. It:
 1. Copies the input HDF5 (produced by the R preprocessing side) to a new
    output filename encoding the hyperparameters used: the historic
    `obs`/`ent`/`dist`/`pow` fields are always embedded (regardless of
-   whether they're at their default value — matching pre-registry
-   behavior), and `flow_model_training.extra_weight_filename_suffix`
+   whether they're zero, nonzero, or at their default — matching
+   pre-registry behavior), and `flow_model_training.extra_weight_filename_suffix`
    appends a `_<name><value>` segment for any *other* registered loss
-   weight (e.g. `flow_l2`) only when it differs from that weight's
-   `argparse` default. This keeps filenames for historic/default runs
-   byte-identical to before the registry refactor, while ensuring two
-   runs that differ only in a newly added weight don't collide on the
-   same output filename and silently overwrite each other.
+   weight (e.g. `flow_l2`) only when it's nonzero — matching `loss_fn`'s
+   own `weights.get(name, 0.0)` convention, where a zero weight means the
+   term has no effect on the loss at all. This keeps filenames for runs
+   that leave new weights at zero byte-identical to before the registry
+   refactor, while ensuring two runs that differ only in a newly added,
+   nonzero weight don't collide on the same output filename and silently
+   overwrite each other.
 2. Reads `distr` (true weekly densities), `distances` (flat pairwise
    distance vector, raised to `dist_pow` and optionally rescaled by
    `1/100^dist_pow`), and `geom/dynamic_mask` (per-week active-cell mask)

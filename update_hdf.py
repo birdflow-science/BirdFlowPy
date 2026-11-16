@@ -47,13 +47,7 @@ loss_weights = {
     'ent': args.ent_weight,
     'flow_l2': args.flow_l2_weight,
 }
-loss_weight_defaults = {
-    'obs': parser.get_default('obs_weight'),
-    'dist': parser.get_default('dist_weight'),
-    'ent': parser.get_default('ent_weight'),
-    'flow_l2': parser.get_default('flow_l2_weight'),
-}
-extra_weights_suffix = extra_weight_filename_suffix(loss_weights, loss_weight_defaults)
+extra_weights_suffix = extra_weight_filename_suffix(loss_weights)
 
 hdf_src = os.path.join(args.root, f'{args.species}_{args.ebirdst_year}_{args.resolution}km.hdf5')
 hdf_dst = os.path.join(args.root, f'{args.species}_{args.ebirdst_year}_{args.resolution}km_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}{extra_weights_suffix}_pow{args.dist_pow}.hdf5')

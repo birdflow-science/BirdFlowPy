@@ -89,26 +89,27 @@ LOSS_TERMS = {
 }
 
 # obs/dist/ent are the three terms update_hdf.py's output filename has
-# always encoded, regardless of whether they're at their default value.
+# always encoded, regardless of whether they're zero or nonzero.
 HISTORIC_WEIGHT_NAMES = ('obs', 'dist', 'ent')
 
-def extra_weight_filename_suffix(weights, defaults, historic_names=HISTORIC_WEIGHT_NAMES):
+def extra_weight_filename_suffix(weights, historic_names=HISTORIC_WEIGHT_NAMES):
     """Build a filename suffix for loss weights beyond the historic
     obs/dist/ent trio, which update_hdf.py's output filename already
     encodes unconditionally.
 
-    Any other weight (e.g. flow_l2) is included only if it differs from
-    its registered default in `defaults` (each term's --<name>_weight
-    CLI default), so a run that doesn't touch a newly added term
-    produces the same filename it would have before that term existed --
-    avoiding a silent filename collision between two runs that differ
-    only in a weight that previously didn't exist.
+    Any other weight (e.g. flow_l2) is included only if it's nonzero --
+    matching loss_fn's own weights.get(name, 0.0) convention, where a
+    zero weight means the term has no effect on the loss at all, so a
+    run that leaves a newly added term at zero produces the same
+    filename it would have before that term existed. This avoids a
+    silent filename collision between two runs that differ only in a
+    weight that previously didn't exist.
     """
     parts = []
     for name in sorted(weights):
         if name in historic_names:
             continue
-        if weights[name] != defaults.get(name, 0.0):
+        if weights[name] != 0.0:
             parts.append(f'{name}{weights[name]}')
     return ''.join(f'_{p}' for p in parts)
 
