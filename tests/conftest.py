@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 from flow_model_training import Datatuple, mask_input
@@ -42,3 +43,36 @@ def small_training_fixture():
     cells = [d.shape[0] for d in masked_densities]
 
     return dtuple, d_matrices, masked_densities, cells
+
+
+@pytest.fixture
+def synthetic_hdf5_fixture(tmp_path):
+    """Writes a small HDF5 file shaped like what update_hdf.py expects
+    (distr, distances, geom/dynamic_mask), for end-to-end regression tests
+    of update_hdf.py itself. Returns (root_dir, species, resolution,
+    ebirdst_year) -- the positional args update_hdf.py needs to find it.
+    """
+    weeks, cells = 4, 6
+    rng = np.random.RandomState(0)
+
+    distr = rng.dirichlet(np.ones(cells), size=weeks).T
+    n_pairs = cells * (cells - 1) // 2
+    distances = rng.rand(n_pairs)
+    dynamic_mask = np.ones((cells, weeks), dtype=bool)
+
+    species = 'test'
+    resolution = 100
+    ebirdst_year = 2021
+
+    import h5py
+
+    path = tmp_path / f'{species}_{ebirdst_year}_{resolution}km.hdf5'
+    with h5py.File(path, 'w') as f:
+        f.create_dataset('distr', data=distr)
+        f.create_dataset('distances', data=distances)
+        geom = f.create_group('geom')
+        geom.create_dataset('dynamic_mask', data=dynamic_mask.astype('i1'))
+        meta = f.create_group('metadata')
+        meta.create_dataset('birdflow_model_date', data='placeholder')
+
+    return str(tmp_path), species, resolution, ebirdst_year
