@@ -2,7 +2,9 @@
 
 This is a from-scratch summary of how the four top-level scripts fit together,
 written for someone who knows the BirdFlowR model/data structures but not JAX
-or Haiku. It reflects the state of the code as of commit `de0d77d` (2026-11-16).
+or Haiku. It reflects the state of the code as of commit `de0d77d` (2026-11-16),
+updated for the loss-term registry refactor on branch `pluggable-loss-terms`
+(see `dev/workplan.md`).
 
 ## The four files and how they relate
 
@@ -122,7 +124,37 @@ directly:
   change. Calling `process_data` as-is will raise a `TypeError`. `run_model.py`
   and `birdflow_demo.ipynb` both depend on this broken path (see below).
 
-### Loss components
+### Loss components: a pluggable registry
+
+Loss terms are no longer hardcoded into `loss_fn`'s signature and return
+value. Every term function shares one signature —
+`term_fn(pred_densities, flows, true_densities, d_matrices) -> scalar` —
+even where it ignores most of the arguments, and a module-level dict,
+`LOSS_TERMS`, maps a term's name to `(sign, term_fn)`:
+
+```python
+LOSS_TERMS = {
+    'obs': (1.0, obs_loss),
+    'dist': (1.0, distance_loss),
+    'ent': (-1.0, ent_loss),
+    'flow_l2': (1.0, flow_l2_loss),
+}
+```
+
+`sign` is `+1` for a term that's penalized (pushes the loss up — obs,
+dist, flow_l2) and `-1` for a term that's rewarded (entropy; higher
+entropy is desirable, so it's *subtracted*). `loss_fn(params, cells,
+true_densities, d_matrices, weights)` takes a `weights` dict
+(`{'obs': ..., 'dist': ...}`, one float per term name you want nonzero —
+any name not present defaults to weight `0.0`) and loops over
+`LOSS_TERMS`, computing every term's value and summing `sign * weight *
+value` into the total. It returns `(total, components)`, where
+`components` is a dict of every term's raw (unweighted) value — so
+`train_model`'s `loss_dict` history has one list per term name,
+discovered from whatever keys the dict actually contains, rather than
+three hardcoded fields.
+
+The individual terms:
 
 - `obs_loss` — sum of squared residuals between predicted and true weekly
   densities (fit term).
@@ -130,16 +162,44 @@ directly:
   proportional to how much mass moves how far, where "far" is whatever
   distance/cost matrix was supplied (raised to `dist_pow` and optionally
   normalized before this function ever sees it — that happens in the
-  calling script).
+  calling script; see "Three kinds of configurable parameter" below).
 - `entropy` / `ent_loss` — joint entropy of the flow matrices minus the
-  entropy of the marginal distributions; this is the same
+  entropy of the marginal densities; this is the same
   "marginal-minus-joint" entropy regularizer that shows up in BirdFlowR's
   math for discouraging degenerate (too-concentrated or too-diffuse)
   transition distributions.
-- `loss_fn` — runs the model forward (`model_forward.apply`), derives
-  predicted weekly densities from the flow matrices, and combines the three
-  terms as `obs_weight*obs + dist_weight*dist - ent_weight*ent`. This is the
-  scalar that gets differentiated.
+- `flow_l2_loss` — `sum(flow ** 2)` across all weeks' flow matrices, an L2
+  penalty directly on the flow amounts. This is a worked example added to
+  prove the registry mechanism, not a term in active scientific use yet —
+  its default weight is `0.0`, i.e. off.
+
+Adding a new additive loss term going forward means: write a function
+matching the shared signature, add one `name: (sign, term_fn)` entry to
+`LOSS_TERMS`, and (for the CLI) add a `--<name>_weight` argparse flag in
+`update_hdf.py`, default `0.0`. Nothing else needs to change — `loss_fn`,
+`train_model`, and `update_hdf.py`'s HDF5-writing code all iterate over
+whatever terms/weights are present.
+
+### Three kinds of configurable parameter
+
+Not every tunable in `update_hdf.py` is a loss-term weight, and it's worth
+distinguishing the three kinds that exist or are anticipated:
+
+1. **Loss term weights** — tracked by `LOSS_TERMS` as above (`obs`,
+   `dist`, `ent`, `flow_l2`). Mechanism: `--<name>_weight`, default `0.0`.
+2. **Other numeric parameters that aren't loss weights** — e.g.
+   `--dist_pow` and `--dont_normalize`, which transform the raw distance
+   vector *before* `mask_input` builds the per-week `distance_matrices`
+   that `distance_loss` later consumes. These don't go through
+   `LOSS_TERMS` or the `weights` dict at all; they shape the *data* a term
+   is handed, not how heavily its output counts toward the total loss.
+   Mechanism: a plain numeric `argparse` flag, consumed directly in
+   `update_hdf.py`'s pre-processing, upstream of `loss_fn`.
+3. **Switch-style arguments that change how a term is calculated** — e.g.
+   a hypothetical alternative entropy formula. Not yet implemented for any
+   term; the anticipated mechanism is a string-selector flag per variable
+   term (e.g. `--ent_loss_variant {default,alt}`) dispatching through a
+   small `{name: fn}` registry, defaulting to `"default"`.
 
 ### `train_model` — the optimization loop
 
@@ -155,8 +215,9 @@ directly:
   and compiles it to an XLA kernel (optionally GPU) — this is why the loop
   itself has no vectorization tricks: the heavy lifting is JIT compilation,
   not NumPy-style batching.
-- Returns the fitted `params` dict and a `loss_dict` history (total/obs/dist/ent
-  per step) for diagnostics.
+- Returns the fitted `params` dict and a `loss_dict` history (`total` plus
+  one entry per `LOSS_TERMS` key, built generically from the aux dict
+  `loss_fn` returns each step) for diagnostics.
 
 ## `update_hdf.py` — the live interface to BirdFlowR
 
@@ -178,9 +239,12 @@ This is the script actually used in the current R↔Python pipeline. It:
 5. Writes results back into the **same** HDF5 file: a `marginals` group
    (one dataset per week-to-week flow matrix), updated metadata
    (`birdflow_model_date`), a `metadata/hyperparameters` group, and a
-   `metadata/loss_values` group with the full loss history. It also deletes
-   the now-stale `distances` dataset. This output structure is what
-   BirdFlowR expects to read back in.
+   `metadata/loss_values` group with the full loss history. Both of the
+   latter two groups are written by iterating over the `loss_weights` /
+   `loss_dict` dicts, so a new `LOSS_TERMS` entry with a corresponding CLI
+   flag shows up in the HDF5 output automatically, with no changes to this
+   script's writing logic. It also deletes the now-stale `distances`
+   dataset. This output structure is what BirdFlowR expects to read back in.
 
 ## Stale vs. current paths
 
@@ -204,9 +268,37 @@ historical/aspirational and would need rework (regenerating a per-week
 `gen_d_matrix`-equivalent, fixing `Datatuple` arity, updating the JAX index
 API) before they'd run against the current code.
 
+## Tests
+
+`tests/` (pytest) covers `flow_model_training.py` and `update_hdf.py`:
+
+- `tests/test_loss_terms.py` — unit tests for each `LOSS_TERMS` function
+  against hand-computed values on a tiny fixture.
+- `tests/test_golden_loss_fn.py` — golden-value regression tests: exact
+  frozen loss history and fitted parameters for `loss_fn`/`train_model`
+  on a small fixed synthetic dataset with a fixed RNG seed, plus checks
+  that an unweighted (`0.0`) term is a true no-op and a nonzero-weighted
+  term actually changes the loss.
+- `tests/test_update_hdf_golden.py` — end-to-end: invokes `update_hdf.py`
+  as a subprocess against a synthetic HDF5 fixture
+  (`tests/conftest.py::synthetic_hdf5_fixture`) and checks the output
+  HDF5's `marginals`/`metadata/loss_values`/`metadata/hyperparameters`
+  against frozen expected values. These were captured by diffing a
+  pre-refactor run (a `git worktree` at commit `dce4646`, the last commit
+  before the `LOSS_TERMS` registry refactor) against a post-refactor run
+  on the identical fixture, which confirmed the output is identical
+  except for the two new `flow_l2`-related keys the registry now always
+  computes.
+
+Run with `.venv/bin/python -m pytest tests/` (see `requirements-dev.txt`
+for the pinned local-dev environment; this has not been verified against
+the Unity/`BirdFlowContainer` production environment — see
+`dev/workplan.md`).
+
 ## Dependencies
 
 `jax`, `haiku` (`dm-haiku`), `optax`, `scipy` (pairwise distances in the
 unused `gen_d_matrix`-era code), `h5py` (HDF5 I/O), `numpy`. No
 `setup.py`/`pyproject.toml` — this is a loose script collection, not an
-installable package.
+installable package. `requirements-dev.txt` pins a local-dev-only test
+environment (see "Tests" above).
