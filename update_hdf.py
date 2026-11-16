@@ -59,14 +59,18 @@ cells = [d.shape[0] for d in masked_densities]
 key = hk.PRNGSequence(args.rng_seed)
 optimizer = optax.adam(args.learning_rate)
 
+loss_weights = {
+    'obs': args.obs_weight,
+    'dist': args.dist_weight,
+    'ent': args.ent_weight,
+}
+
 # Instantiate loss function
 loss_fn = jit(partial(loss_fn,
                       cells=cells,
-                      true_densities=masked_densities, 
-                      d_matrices=distance_matrices, 
-                      obs_weight=args.obs_weight, 
-                      dist_weight=args.dist_weight,
-                      ent_weight=args.ent_weight))
+                      true_densities=masked_densities,
+                      d_matrices=distance_matrices,
+                      weights=loss_weights))
 
 # Run Training and get params and losses
 params, loss_dict = train_model(loss_fn,
@@ -105,9 +109,8 @@ del file['metadata/birdflow_model_date']
 file.create_dataset('metadata/birdflow_model_date', data=str(datetime.today()))
 
 hyper = file.create_group("metadata/hyperparameters")
-hyper.create_dataset('obs_weight', data=args.obs_weight)
-hyper.create_dataset('ent_weight', data=args.ent_weight)
-hyper.create_dataset('dist_weight', data=args.dist_weight)
+for name, weight in loss_weights.items():
+    hyper.create_dataset(f'{name}_weight', data=weight)
 hyper.create_dataset('dist_pow', data=args.dist_pow)
 hyper.create_dataset('learning_rate', data=args.learning_rate)
 hyper.create_dataset('training_steps', data=args.training_steps)
@@ -115,9 +118,7 @@ hyper.create_dataset('rng_seed', data=args.rng_seed)
 hyper.create_dataset('normalized', data=not args.dont_normalize)
 
 loss_vals = file.create_group("metadata/loss_values")
-loss_vals.create_dataset('total', data=loss_dict['total'])
-loss_vals.create_dataset('obs', data=loss_dict['obs'])
-loss_vals.create_dataset('dist', data=loss_dict['dist'])
-loss_vals.create_dataset('ent', data=loss_dict['ent'])
+for name, values in loss_dict.items():
+    loss_vals.create_dataset(name, data=values)
 
 file.close()

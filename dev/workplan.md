@@ -113,24 +113,43 @@ one entry, not editing three functions.
 
 ## Step 4 — CLI mechanism for alternates (in `update_hdf.py`)
 
-Two distinct mechanisms, matching the two kinds of change you
-described:
+Three distinct kinds of configurable parameter, each with its own
+mechanism:
 
-- **Pure additions** (a new term summed in alongside the existing
-  three): one `--<name>_weight` flag per term, default `0.0`. Zero
-  weight is already "off" given the registry, so this preserves
-  current default behavior with no branching logic, and matches the
-  existing `--obs_weight`/`--dist_weight`/`--ent_weight` convention
-  (`update_hdf.py:23-25`) for the R side to construct calls the same
-  way it already does.
-- **Variants of an existing term** (e.g. a different entropy formula,
-  not an additional one): a string-selector flag per variable term,
-  e.g. `--ent_loss_variant {default,alt}`, dispatching through a
-  `{name: fn}` registry, defaulting to `"default"` so existing
-  invocations are unaffected.
-- Not adding a generic `--loss_config` JSON escape hatch — harder to
-  construct/validate from R, and there aren't enough variants yet to
-  need that generality.
+1. **Loss term weights** — tracked by the Step 3 `LOSS_TERMS` registry
+   (`obs`, `dist`, `ent`, and new additive terms like `flow_l2`).
+   Mechanism: one `--<name>_weight` flag per term, default `0.0`. Zero
+   weight is already "off" given the registry, so this preserves
+   current default behavior with no branching logic, and matches the
+   existing `--obs_weight`/`--dist_weight`/`--ent_weight` convention
+   (`update_hdf.py:23-25`) for the R side to construct calls the same
+   way it already does.
+2. **Other numeric parameters that are not loss-term weights** — e.g.
+   `--dist_pow` (`update_hdf.py:26`), which raises the raw distance
+   vector to a power *before* `mask_input` builds the per-week
+   `distance_matrices` (`update_hdf.py:49-51`), and `--dont_normalize`,
+   which rescales that same vector. Neither goes through `LOSS_TERMS`
+   or the `weights` dict at all — they shape the *data* a term
+   consumes (here, `d_matrices`), not how heavily the term's output is
+   weighted in the total loss. `dist_pow` already exists as a working
+   example of this category; the mechanism for it is unchanged by
+   this plan (a plain `argparse` numeric flag, consumed directly in
+   `update_hdf.py`'s pre-processing before `loss_fn` is ever called).
+   Any future parameter of this kind (e.g. a transform applied to
+   `true_densities` or `masks` before fitting) follows the same
+   pattern: a plain flag, applied upstream of `loss_fn`, not a
+   registry entry.
+3. **Switch-style arguments that change how something is calculated**
+   (variants of an existing term, e.g. a different entropy formula,
+   not an additional term): a string-selector flag per variable term,
+   e.g. `--ent_loss_variant {default,alt}`, dispatching through a
+   `{name: fn}` registry, defaulting to `"default"` so existing
+   invocations are unaffected. Not yet implemented for any term —
+   hypothetical, pending a concrete variant to build.
+
+Not adding a generic `--loss_config` JSON escape hatch for any of the
+above — harder to construct/validate from R, and there isn't enough
+variety yet in any of the three categories to need that generality.
 
 ### Example additive term (smoke test of the mechanism)
 

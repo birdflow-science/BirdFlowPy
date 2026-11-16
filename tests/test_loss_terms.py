@@ -9,13 +9,15 @@ from flow_model_training import distance_loss, ent_loss, entropy, obs_loss
 def test_obs_loss_hand_calculated(tiny_densities):
     pred_densities, true_densities = tiny_densities
     # (0.5-0.4)^2 + (0.5-0.6)^2 + (0.6-0.5)^2 + (0.4-0.5)^2 = 0.04
-    assert float(obs_loss(pred_densities, true_densities)) == pytest.approx(0.04)
+    result = obs_loss(pred_densities, None, true_densities, None)
+    assert float(result) == pytest.approx(0.04)
 
 
 def test_distance_loss_hand_calculated(tiny_flow):
     flows, d_matrices = tiny_flow
     # 0.2*1 + 0.3*2 + 0.1*3 + 0.4*4 = 2.7
-    assert float(distance_loss(flows, d_matrices)) == pytest.approx(2.7)
+    result = distance_loss(None, flows, None, d_matrices)
+    assert float(result) == pytest.approx(2.7)
 
 
 def test_entropy_hand_calculated():
@@ -38,7 +40,7 @@ def test_ent_loss_matches_manual_combination(tiny_densities, tiny_flow):
     pred_densities, _ = tiny_densities
     flows, _ = tiny_flow
 
-    result = ent_loss(flows, pred_densities)
+    result = ent_loss(pred_densities, flows, None, None)
 
     expected = sum(float(entropy(f)) for f in flows) - sum(
         float(entropy(p)) for p in pred_densities

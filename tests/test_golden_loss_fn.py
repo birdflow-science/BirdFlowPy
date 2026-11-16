@@ -31,15 +31,15 @@ LEARNING_RATE = 0.1
 def _run(small_training_fixture):
     dtuple, d_matrices, masked_densities, cells = small_training_fixture
 
+    weights = {'obs': OBS_WEIGHT, 'dist': DIST_WEIGHT, 'ent': ENT_WEIGHT}
+
     bound_loss_fn = jit(
         partial(
             loss_fn,
             cells=cells,
             true_densities=masked_densities,
             d_matrices=d_matrices,
-            obs_weight=OBS_WEIGHT,
-            dist_weight=DIST_WEIGHT,
-            ent_weight=ENT_WEIGHT,
+            weights=weights,
         )
     )
 

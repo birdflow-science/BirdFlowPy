@@ -41,14 +41,18 @@ def mask_input(true_densities, dtuple):
         
     return distance_matrices, masked_densities
     
-def obs_loss(pred_densities, true_densities):
+# Every loss term shares this signature, even where it ignores most of
+# the arguments, so terms are interchangeable in LOSS_TERMS below.
+#     term_fn(pred_densities, flows, true_densities, d_matrices) -> scalar
+
+def obs_loss(pred_densities, flows, true_densities, d_matrices):
     obs = 0
     for pred, true in zip(pred_densities, true_densities):
         residual = true - pred
         obs += jnp.sum(jnp.square(residual))
     return obs
 
-def distance_loss(flows, d_matrices):
+def distance_loss(pred_densities, flows, true_densities, d_matrices):
     dist = 0
     for flow, d_matrix in zip(flows, d_matrices):
         dist += jnp.sum(flow * d_matrix)
@@ -60,25 +64,37 @@ def entropy(probs):
     h = -1 * jnp.sum(ent)
     return h
 
-def ent_loss(flows, densities):
+def ent_loss(pred_densities, flows, true_densities, d_matrices):
     ent = 0
     for f in flows:
         ent += entropy(f)
-    for d in densities:
+    for d in pred_densities:
         ent -= entropy(d)
     return ent
 
-def loss_fn(params, cells, true_densities, d_matrices, obs_weight, dist_weight, ent_weight):
+# name -> (sign, term_fn). `sign` lets a term be rewarded (-1, like entropy,
+# which we want to maximize) or penalized (+1) without hardcoding which is
+# which in loss_fn. Adding a new loss term means adding one entry here.
+LOSS_TERMS = {
+    'obs': (1.0, obs_loss),
+    'dist': (1.0, distance_loss),
+    'ent': (-1.0, ent_loss),
+}
+
+def loss_fn(params, cells, true_densities, d_matrices, weights):
     weeks = len(true_densities)
     pred = model_forward.apply(params, None, cells, weeks)
     d0, flows = pred
     pred_densities = [d0] + [jnp.sum(flow, axis=0) for flow in flows]
-    
-    obs = obs_loss(pred_densities, true_densities)
-    dist = distance_loss(flows, d_matrices)
-    ent = ent_loss(flows, pred_densities)
-    
-    return (obs_weight * obs) + (dist_weight * dist) + (-1 * ent_weight * ent), (obs, dist, ent)
+
+    total = 0
+    components = {}
+    for name, (sign, term_fn) in LOSS_TERMS.items():
+        value = term_fn(pred_densities, flows, true_densities, d_matrices)
+        components[name] = value
+        total += sign * weights.get(name, 0.0) * value
+
+    return total, components
 
 def train_model(loss_fn,
                 optimizer,
@@ -97,20 +113,13 @@ def train_model(loss_fn,
 
     update = jit(update)
 
-    loss_dict = {
-        'total' : [],
-        'obs' : [],
-        'dist' : [],
-        'ent' : [],
-    }
+    loss_dict = {'total': []}
 
     for step in range(training_steps):
         params, opt_state, loss = update(params, opt_state)
         total_loss, loss_components = loss
-        obs, dist, ent = loss_components
         loss_dict['total'].append(float(total_loss))
-        loss_dict['obs'].append(float(obs))
-        loss_dict['dist'].append(float(dist))
-        loss_dict['ent'].append(float(ent))
-    
+        for name, value in loss_components.items():
+            loss_dict.setdefault(name, []).append(float(value))
+
     return params, loss_dict
