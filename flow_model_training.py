@@ -60,12 +60,12 @@ def entropy(probs):
     h = -1 * jnp.sum(ent)
     return h
 
-def ent_loss(probs, flows):
+def ent_loss(flows, densities):
     ent = 0
-    for p in probs:
-        ent += entropy(p)
     for f in flows:
-        ent -= entropy(f)
+        ent += entropy(f)
+    for d in densities:
+        ent -= entropy(d)
     return ent
 
 def loss_fn(params, cells, true_densities, d_matrices, obs_weight, dist_weight, ent_weight):

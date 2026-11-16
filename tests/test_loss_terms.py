@@ -35,11 +35,6 @@ def test_entropy_degenerate_distribution_is_nan():
 
 
 def test_ent_loss_matches_manual_combination(tiny_densities, tiny_flow):
-    # ent_loss is currently called in loss_fn as ent_loss(flows, pred_densities),
-    # i.e. its first positional argument (named `probs` in the def) receives
-    # the flow matrices, and its second (named `flows`) receives the
-    # densities. This test pins that *actual* call convention, not the
-    # (currently swapped) parameter names.
     pred_densities, _ = tiny_densities
     flows, _ = tiny_flow
 
