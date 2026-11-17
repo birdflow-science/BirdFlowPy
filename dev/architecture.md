@@ -279,6 +279,51 @@ historical/aspirational and would need rework (regenerating a per-week
 `gen_d_matrix`-equivalent, fixing `Datatuple` arity, updating the JAX index
 API) before they'd run against the current code.
 
+## Running on Unity, and testing an unmerged branch there
+
+Production fitting runs inside `BirdFlowContainer` (a separate repo) on
+Unity. That container only supplies the shared **environment** —
+conda/Python, R, and pinned libraries (`jax[cuda12]`, `dm-haiku`,
+`optax`, `h5py`, etc.) via `BirdFlowContainer.sif` — it does not bake in
+a copy of this repo's code. Per `BirdFlowContainer`'s own README, you
+launch the shared `.sif` through Unity OnDemand's RStudio IDE, then
+open whatever local clone of BirdFlowPy you want as the RStudio
+project; `update_hdf.py` runs out of that directory against the
+container's environment. Code and environment are already decoupled
+per user.
+
+That means testing an unmerged feature branch on Unity — without
+affecting other users or rebuilding the container — only requires
+checking the branch out into its own directory and pointing a
+RStudio session at it, e.g. from an existing BirdFlowPy clone on
+Unity:
+
+```bash
+git worktree add ../BirdFlowPy-<branch-name> <branch-name>
+```
+
+A worktree is preferable to a second full clone: same repo/object
+store, just a second directory checked out to a different ref, no
+separate remote to keep in sync. Then in RStudio, open
+`BirdFlowPy-<branch-name>/` as the project instead of your usual
+checkout. Other users' sessions, pointed at their own (presumably
+`main`) checkouts, are unaffected.
+
+When `update_hdf.py` is instead driven through `BirdFlowPipeline`
+(the R package that orchestrates batch preprocessing/model
+fits/downstream R processing on the cluster) rather than opened
+directly as an RStudio project, the directory it runs
+`update_hdf.py` out of is controlled by
+`BirdFlowPipeline::the$python_repo_path`, not by whatever RStudio
+project happens to be open. To point a `BirdFlowPipeline`-driven run
+at an unmerged branch's worktree instead of the default checkout,
+update that path accordingly.
+
+This only breaks down if a branch needs a dependency the image
+doesn't already have — then the shared environment itself needs a
+rebuild (see `BirdFlowContainer`'s README), since that part, unlike
+the code, is genuinely shared across users.
+
 ## Tests
 
 `tests/` (pytest) covers `flow_model_training.py` and `update_hdf.py`:

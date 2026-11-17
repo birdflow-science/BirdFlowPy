@@ -20,6 +20,39 @@ recalling history; consult the archive only if the answer isn't here.
 
 ## 2026-11-16 — branch pluggable-loss-terms
 
+### Documented testing an unmerged branch on Unity
+
+Prompted by planning how to test this branch (or issue #7's eventual
+temporal-smoothing work) on Unity without affecting other users or
+rebuilding `BirdFlowContainer`. Established that the container
+(`../BirdFlowContainer/BirdFlowContainer.def`, a separate repo) only
+supplies the shared environment (conda/Python, R, pinned
+`jax`/`dm-haiku`/`optax`/`h5py`, etc.) — it never bakes in a copy of
+this repo's code. Per `BirdFlowContainer`'s README, a user launches
+the shared `.sif` via Unity OnDemand's RStudio IDE and then opens
+whichever local BirdFlowPy clone they want as the RStudio project, so
+code and environment are already decoupled per user.
+
+Added a new "Running on Unity, and testing an unmerged branch there"
+section to `dev/architecture.md` (between "Stale vs. current paths"
+and "Tests") documenting the consequence: testing a feature branch is
+just `git worktree add ../BirdFlowPy-<branch-name> <branch-name>` plus
+pointing an RStudio session at that directory — a worktree rather than
+a second clone, since it shares the same repo/object store with no
+separate remote to sync. Flagged the one case where this doesn't
+suffice: a branch that needs a dependency the shared image doesn't
+already have would require an actual container rebuild.
+
+Also noted that when `update_hdf.py` is instead invoked via
+`BirdFlowPipeline` (the R package driving batch
+preprocessing/fits/downstream processing on the cluster) rather than
+run from an open RStudio project directly, the directory it uses is
+controlled by `BirdFlowPipeline::the$python_repo_path`, not by
+whatever RStudio project is open — so pointing a pipeline-driven run
+at a branch worktree means updating that setting instead.
+
+No code changes; `dev/architecture.md` only.
+
 ### Added version tracking and a changelog
 
 No version number or changelog existed anywhere in the repo (no
