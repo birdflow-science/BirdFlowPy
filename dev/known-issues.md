@@ -147,16 +147,106 @@ BirdFlowPy's training/fitting path inside the current container,
 since the container as currently built may be broken for model
 fitting regardless of this branch.
 
-**Fix (not yet applied, needs a decision):** pin explicit dependency
-versions somewhere with real authority over what ships — most likely
-in `BirdFlowContainer.def` itself, since that repo controls what
-production actually installs — and either match `requirements-dev.txt`
-to those pins or document explicitly why/how it differs, rather than
-having two unrelated, undocumented version sets. Should also settle
-whether `pluggable-loss-terms`'s golden tests need regenerating against
-the production version stack (floating-point results can shift across
-jax/numpy versions even absent an API break) before this branch is
-considered verified for merge.
+### Broader context: why this differs from BirdFlowR, and the existing validation path
+
+Discussed 2026-11-17 with the project owner. BirdFlowR tracks
+latest R/CRAN continuously, validated by its own CI on every PR and
+merge to main — that's viable because CRAN runs reverse-dependency
+checks before a package release ships, catching most breakage before
+it reaches consumers. PyPI has no equivalent gatekeeper: any package
+(jax very much included) can break its own API in a minor version
+with nothing catching it centrally, which is exactly the shape of
+issue #5. BirdFlowPy is also public but far less supported than
+BirdFlowR — the team's actual production use case is fitting and
+releasing models once, which users then consume through BirdFlowR,
+not continuous external development on BirdFlowPy itself. Floating
+dependency versions with no CI (today's state: `BirdFlowContainer.def`
+runs unpinned `pip install --upgrade`) is the one combination that
+doesn't work: no gatekeeper and no validation.
+
+`BirdFlowContainer` is rebuilt rarely (every couple of years, last
+triggered by R falling behind) and shared identically by the whole
+team, so a silent Python dependency change inside a routine rebuild is
+a real risk, not just a tidiness concern.
+
+Important existing piece: **`BirdFlowPipeline`** (a separate R
+package, not covered by this repo) is what actually drives model
+fitting/evaluation *on Unity specifically*, including launching
+parallel jobs, and it has its own test suite. Per `BirdFlowContainer`'s
+README ("Rebuilding the BirdFlowContainer apptainer" step 3), running
+`devtools::test()` from the `BirdFlowPipeline` RStudio project against
+a freshly built container is already the team's standing validation
+step before trusting a rebuild. That makes it the closest thing to CI
+this stack has today — it's just manual, Unity-specific, and runs only
+at rebuild time rather than continuously.
+
+Confirmed 2026-11-17 by the project owner: (1) `BirdFlowPipeline`'s
+suite does **not** exercise this branch's new features (the
+`LOSS_TERMS` registry, `flow_l2`, the new HDF5 output fields) — only
+the pre-registry path. (2) It does run full model fits, so it would
+likely surface a hard dependency break (e.g. issue #5's error) that
+occurs mid-fit; less clear is how rigorously it snapshots/compares
+*fitted model output* across runs, so it's a better bet for "does
+fitting still run at all" than "did the fitted result subtly change."
+This means it validates dependency bumps/container rebuilds
+reasonably well, but isn't a substitute for this branch's own test
+suite (`tests/`) when it comes to verifying the loss-term-registry
+refactor itself.
+
+Given that, and that the project owner is currently the only user of
+this branch's new features (in active development on them, so bugs
+there are expected and tolerable), the stated priority for merging
+`pluggable-loss-terms` is narrower than "fully verified in
+production": don't break the existing (pre-registry) workflow, while
+opening room to develop new loss terms. That's a materially lower bar
+than requiring `BirdFlowPipeline`'s suite to validate the new
+features before merge — it can't, by design, so merge-readiness should
+be judged by `tests/`'s own golden-value regression tests (proving the
+refactor doesn't change pre-existing behavior) rather than waiting on
+`BirdFlowPipeline` coverage that was never going to arrive for this
+branch.
+
+**Fix (not yet applied, needs a decision) — proposed direction:**
+
+1. **Make BirdFlowPy's own pinned versions the single source of
+   truth**, rather than two independently drifting files. Added
+   `requirements.txt` at the repo root (2026-11-17) recording the
+   table above as explicit pins — captured from the current container,
+   not yet verified as a working set end-to-end. `requirements-dev.txt`
+   keeps only dev-only additions (`pytest`) layered on top instead of
+   diverging silently. Still open: actually repointing
+   `BirdFlowContainer.def` to install Python dependencies *from*
+   `requirements.txt` instead of its own inline `pip install --upgrade`
+   lines — deliberately not done yet, since that requires an actual
+   container rebuild, which is out of scope for now.
+2. **Freeze, don't float** — given there's no CI continuously
+   validating BirdFlowPy against new dependency releases, floating
+   buys nothing but risk; pin explicitly and bump only on a concrete
+   trigger (a specific feature need, Unity/CUDA forcing a bump, PyPI
+   dropping wheels for the current Python/CUDA combo) rather than on
+   a schedule. This mirrors how rarely the container is rebuilt today,
+   just makes the version set stable *between* rebuilds too, not only
+   at rebuild time.
+3. **Use `BirdFlowPipeline`'s test suite as the deliberate gate for
+   any pin bump**, not just container rebuilds for R's sake — run
+   `devtools::test()` against the new container before adopting a new
+   pin set, and treat a failure as "don't ship this pin," the same way
+   a BirdFlowR CI failure blocks a merge. Confirm first whether that
+   suite actually covers the loss-term-registry/HDF5 changes on this
+   branch; if not, extending it (or adding a narrower Python-side smoke
+   test) is worth a separate decision.
+4. **Record the resolved version set every time the container is
+   rebuilt** (e.g. commit `dev/print_container_versions.sh`'s output
+   alongside `BirdFlowContainer.def`'s change), so "what did we
+   actually get this time" has a durable record instead of living only
+   in whoever did the rebuild's memory — directly answering requests
+   like issue #5's.
+
+Should also settle whether `pluggable-loss-terms`'s own golden tests
+need regenerating against whatever version set gets pinned
+(floating-point results can shift across jax/numpy versions even
+absent an API break) before this branch is considered verified for
+merge.
 
 ## Record the package version in HDF5 output metadata
 

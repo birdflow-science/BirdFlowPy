@@ -1,0 +1,19 @@
+# Dependency versions confirmed installed in BirdFlowContainer on Unity
+# as of 2026-11-17 (captured via dev/print_container_versions.sh; Python
+# 3.13.9). BirdFlowContainer.def itself still installs these unpinned
+# (plain `pip install --upgrade`) -- this file documents what that
+# currently resolves to, as a reference for anyone running BirdFlowPy
+# outside the container, pending a decision on actually pinning
+# BirdFlowContainer.def's build to this file. See dev/known-issues.md's
+# "No pinned/tracked dependency versions for the production environment
+# (issue #5)" entry.
+#
+# NOT the same as requirements-dev.txt, which pins an older,
+# Python-3.9-compatible stack for local development only.
+jax==0.8.0
+jaxlib==0.8.0
+dm-haiku==0.0.15
+optax==0.2.6
+scipy==1.16.2
+h5py==3.15.1
+numpy==2.3.4

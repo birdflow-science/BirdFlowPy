@@ -20,6 +20,30 @@ recalling history; consult the archive only if the answer isn't here.
 
 ## 2026-11-17 — branch pluggable-loss-terms
 
+### Clarified BirdFlowPipeline test suite's coverage and merge bar
+
+Project owner confirmed `BirdFlowPipeline`'s suite doesn't exercise
+this branch's new features (registry/`flow_l2`/new HDF5 fields), does
+run full fits so would likely catch a hard dependency break, but isn't
+clearly rigorous about snapshotting fitted output for regressions.
+Also clarified merge priority: don't break the existing workflow while
+opening room for new loss terms — the owner is currently the sole
+user of the new features and is fine finding bugs in those via normal
+development, so `BirdFlowPipeline` coverage isn't a blocker for this
+branch. Details and reasoning in `dev/known-issues.md`'s issue #5
+entry.
+
+### Discussed dependency-pinning strategy; added requirements.txt
+
+Discussed with the project owner how BirdFlowPy should manage
+dependency versions long-term, given it lacks CI and differs from
+BirdFlowR's continuously-validated approach. Full discussion and
+proposed direction captured in `dev/known-issues.md`'s "No
+pinned/tracked dependency versions for the production environment
+(issue #5)" entry. Pragmatically, added `requirements.txt` recording
+the versions currently installed in the Unity container (not yet
+wired into `BirdFlowContainer.def`; no container rebuild performed).
+
 ### Compared local vs. Unity container dependency versions (issue #5)
 
 Investigated [issue #5](https://github.com/birdflow-science/BirdFlowPy/issues/5),
