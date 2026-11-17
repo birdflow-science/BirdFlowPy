@@ -20,6 +20,41 @@ recalling history; consult the archive only if the answer isn't here.
 
 ## 2026-11-16 — branch pluggable-loss-terms
 
+### Added version tracking and a changelog
+
+No version number or changelog existed anywhere in the repo (no
+`setup.py`/`pyproject.toml` either). Added `_version.py` — a
+standalone `__version__` string (PEP 440/semver convention, the
+standard approach when there's no package `__init__.py` to attach a
+version attribute to) — and `CHANGELOG.md` in [Keep a
+Changelog](https://keepachangelog.com/en/1.1.0/) format.
+
+Backfilled history using the existing `zenodo_release` git tag
+(2022-09-08, tied to the published paper) as `v1.0.0`, and main's
+current state (2023-12-12, i.e. everything accumulated since the tag:
+dynamic masks, `update_hdf.py`'s introduction, hyperparameter CLI
+args, `--ebirdst_year`, etc.) as `v1.1.0`. This branch's own changes
+(loss-term registry, `flow_l2`, the filename fix) are the
+`[Unreleased]` section.
+
+`_version.py` is kept at `1.1.0` (the last *released* version) rather
+than bumped to `1.2.0` — per instruction, it should only move to
+`1.2.0` when this branch's changes actually ship, at the same time the
+changelog's `[Unreleased]` section gets a version number and date.
+
+Also logged a known issue at the user's request (not a review
+finding): `update_hdf.py`'s output HDF5 doesn't record which codebase
+version produced it, which would help trace an old model run back to
+the code that generated it once loss terms/CLI flags start changing
+between releases. See `dev/known-issues.md`'s "Record the package
+version in HDF5 output metadata" entry for the concrete fix sketch
+(write `_version.py`'s `__version__` to a new `metadata/birdflow_py_version`
+dataset, alongside the existing `birdflow_model_date` write).
+
+Pointed `README.md` and `dev/architecture.md` at the new files; both
+updated, no test changes needed (versioning/changelog additions don't
+touch runtime code). Suite still at 17 passing.
+
 ### Critical review of the branch + output-filename collision fix
 
 Ran a critical review of the full `pluggable-loss-terms` diff
