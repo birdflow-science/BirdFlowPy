@@ -60,6 +60,104 @@ weight names is small. Worth revisiting if the registry grows to many
 more terms, or if `weights` is ever constructed somewhere other than
 `update_hdf.py`'s explicit per-flag dict literal.
 
+## `run_model.py` and `birdflow_demo.ipynb` are broken entry points
+
+**Found:** pre-existing, documented in `dev/architecture.md`'s "Stale
+vs. current paths" while writing that doc 2026-11-16.
+
+Neither of these two entry points runs against the current code:
+
+- `run_model.py` calls `process_data`, which constructs `Datatuple`
+  with 5 positional values (`weeks, x_dim, y_dim, cells, nans`) against
+  a 4-field namedtuple (`weeks, cells, distances, masks`) — raises
+  `TypeError`. Both `run_model.py` and the notebook also import
+  `gen_d_matrix` from `flow_model_training.py`, which no longer
+  exists (removed in the same commit that introduced `mask_input`).
+- `birdflow_demo.ipynb` additionally still calls the deprecated
+  `jax.ops.index`/`jax.ops.index_update` API, removed from
+  `flow_model.py` itself in an earlier commit (`43a7840`) but never
+  updated in the notebook.
+
+Both predate the dynamic-mask change (`64e4a65`) and represent the
+older single-static-mask, raster/`.npy`-based workflow that
+`update_hdf.py` superseded as the maintained entry point. They've been
+left broken rather than fixed so far because nothing currently
+depends on them — `update_hdf.py` is the only entry point the R
+pipeline/Unity production path actually calls.
+
+**Fix (not yet applied, needs a decision):** either (a) repair both —
+fix `Datatuple` arity, regenerate a per-week `gen_d_matrix`-equivalent
+compatible with `mask_input`, and update the notebook's JAX indexing
+API — so the raster/`.npy`-based workflow and the grid-search use case
+`run_model.py` was written for work again, or (b) delete both outright
+if that workflow is no longer wanted now that `update_hdf.py`/HDF5 is
+the live path. Worth deciding before the loss-term registry grows
+further (e.g. the temporal-smoothing term from issue #7), since every
+new `LOSS_TERMS` entry widens the gap between what these two stale
+entry points assume and what the current code actually looks like.
+
+## No pinned/tracked dependency versions for the production environment (issue #5)
+
+**Found:** 2026-11-17, investigating [issue #5](https://github.com/birdflow-science/BirdFlowPy/issues/5)
+(user-reported `module 'jax.extend.core' has no attribute 'JaxprEqn'`,
+asking for the specific versions of `jax`/`haiku`/`optax`/`scipy` this
+project needs).
+
+`BirdFlowContainer.def` (the separate repo that builds the production
+image used on Unity) installs `jax[cuda12]`, `flax`, `dm-haiku`,
+`optax`, and `h5py` via plain `pip install --upgrade`, with no version
+pins at all. There is currently no tracked record anywhere of which
+dependency versions BirdFlowPy actually needs or has been tested
+against in production — "whatever pip resolved at the last container
+build" is the only answer, and it silently changes on every rebuild.
+
+This repo's own `requirements-dev.txt` (added for this branch's local
+test suite) is pinned, but deliberately to an *older*, Python
+3.9-compatible stack for local development — not verified against,
+and now confirmed to diverge sharply from, the actual production
+environment. Running `dev/print_container_versions.sh` (added this
+session) inside the current container on Unity vs. the local `.venv`
+gave:
+
+| Package | Local `.venv` (Python 3.9) | Unity container (Python 3.13.9) |
+|---|---|---|
+| jax / jaxlib | 0.4.18 | 0.8.0 |
+| haiku | 0.0.10 | 0.0.15 |
+| optax | 0.1.7 | 0.2.6 |
+| scipy | 1.10.1 | 1.16.2 |
+| h5py | 3.14.0 | 3.15.1 |
+| numpy | 1.26.4 | 2.3.4 |
+
+The numpy divergence is the sharpest: `requirements-dev.txt` pins
+`numpy<2` specifically for Python-3.9 compatibility, but production is
+on numpy 2.3.4. This means `pluggable-loss-terms`'s golden-value
+regression tests (`tests/test_golden_loss_fn.py`,
+`tests/test_update_hdf_golden.py`) have only ever run against the
+numpy-1.x/jax-0.4/Python-3.9 combination locally, and have never
+exercised the numpy-2.x/jax-0.8/Python-3.13 combination that
+production actually runs — the verification already flagged as
+outstanding in `dev/worklog.md` before this branch merges.
+
+Separately, issue #5's reported error
+(`jax.extend.core.JaxprEqn` missing) looks like a plausible
+haiku/jax internal-API incompatibility at the *current* container's
+versions (haiku 0.0.15 against jax 0.8.0) rather than a user
+environment-setup mistake — worth checking by actually running
+BirdFlowPy's training/fitting path inside the current container,
+since the container as currently built may be broken for model
+fitting regardless of this branch.
+
+**Fix (not yet applied, needs a decision):** pin explicit dependency
+versions somewhere with real authority over what ships — most likely
+in `BirdFlowContainer.def` itself, since that repo controls what
+production actually installs — and either match `requirements-dev.txt`
+to those pins or document explicitly why/how it differs, rather than
+having two unrelated, undocumented version sets. Should also settle
+whether `pluggable-loss-terms`'s golden tests need regenerating against
+the production version stack (floating-point results can shift across
+jax/numpy versions even absent an API break) before this branch is
+considered verified for merge.
+
 ## Record the package version in HDF5 output metadata
 
 **Requested:** 2026-11-16, by the project owner (not a review finding).

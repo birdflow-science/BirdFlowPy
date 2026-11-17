@@ -18,6 +18,54 @@ recalling history; consult the archive only if the answer isn't here.
 
 ---
 
+## 2026-11-17 — branch pluggable-loss-terms
+
+### Compared local vs. Unity container dependency versions (issue #5)
+
+Investigated [issue #5](https://github.com/birdflow-science/BirdFlowPy/issues/5),
+a user-reported `module 'jax.extend.core' has no attribute 'JaxprEqn'`
+error asking for the specific `jax`/`haiku`/`optax`/`scipy` versions
+this project needs. Found that `BirdFlowContainer.def` installs these
+via plain `pip install --upgrade` with no version pins, so there was
+no tracked answer anywhere.
+
+Wrote `dev/print_container_versions.sh`, a standalone script (prints
+Python + `jax`/`jaxlib`/`haiku`/`optax`/`scipy`/`h5py`/`numpy`
+versions from whatever environment it's run in) intended to be copied
+to Unity and run inside the container via `apptainer exec
+BirdFlowContainer.sif bash dev/print_container_versions.sh` or
+`reticulate::repl_python()` in an RStudio session. Verified it against
+the local `.venv` first (matched `requirements-dev.txt`'s pins
+exactly). User ran it on Unity inside the current container; results
+diverged sharply from local: Python 3.13.9 (vs. 3.9 locally), jax/jaxlib
+0.8.0 (vs. 0.4.18), haiku 0.0.15 (vs. 0.0.10), optax 0.2.6 (vs. 0.1.7),
+scipy 1.16.2 (vs. 1.10.1), h5py 3.15.1 (vs. 3.14.0), and — most
+notably — numpy 2.3.4 (vs. 1.26.4; `requirements-dev.txt` deliberately
+pins `numpy<2`).
+
+Logged this as a known issue (`dev/known-issues.md`, "No
+pinned/tracked dependency versions for the production environment
+(issue #5)") rather than fixing anything, since the fix needs a
+decision: where to pin (most likely `BirdFlowContainer.def`, since it
+actually controls what ships) and how/whether to reconcile
+`requirements-dev.txt` with those pins. Also flagged two downstream
+consequences worth deciding alongside it: (1) this branch's golden-value
+regression tests have only run against the old numpy-1.x/jax-0.4/
+Python-3.9 stack locally, never the numpy-2.x/jax-0.8/Python-3.13 stack
+production actually runs, so they may need regenerating; (2) issue #5's
+specific error looks like a plausible haiku/jax internal-API
+incompatibility at the container's *current* versions rather than a
+user mistake, meaning the container as currently built may already be
+broken for model fitting independent of anything in this branch.
+
+Also added `run_model.py`/`birdflow_demo.ipynb` as a known issue
+(`dev/known-issues.md`) at the user's request: both are broken against
+current code (`Datatuple` arity mismatch, removed `gen_d_matrix`,
+deprecated JAX indexing API in the notebook — all pre-existing,
+already described in `dev/architecture.md`'s "Stale vs. current
+paths"), framed as a fix-both-or-delete-both decision rather than
+picked for them.
+
 ## 2026-11-16 — branch pluggable-loss-terms
 
 ### Documented testing an unmerged branch on Unity
