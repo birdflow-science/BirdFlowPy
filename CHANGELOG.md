@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `tests/` (pytest) covering `flow_model_training.py` and
   `update_hdf.py`, including golden-value regression tests and an
   end-to-end test of `update_hdf.py` against a synthetic HDF5 fixture.
-  See `requirements-dev.txt` for the pinned local-dev test environment.
+  See `requirements.txt` for the pinned dependency versions (matching
+  the production container on Unity) to run them against.
 - `dev/architecture.md`, `dev/known-issues.md`, and the `dev/`
   workplan/worklog convention.
 

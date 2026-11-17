@@ -20,6 +20,30 @@ recalling history; consult the archive only if the answer isn't here.
 
 ## 2026-11-17 — branch pluggable-loss-terms
 
+### Matched local dev environment to the Unity container; regenerated golden tests; dropped the old environment
+
+Installed Python 3.13.18 (Homebrew) and created `.venv-unity`, pinned
+to `requirements.txt` (the versions captured from the Unity container
+earlier this session). Every package resolved to the exact pinned
+version with no conflicts. Ran `tests/` under `.venv-unity`: no
+import/API errors, but the three golden-value/snapshot tests failed
+with large numeric divergences (including a sign flip in a fitted
+parameter). Cross-checked via a `git worktree` at commit `dce4646`
+(pre-dating this branch's registry refactor): identical failure
+pattern under `.venv-unity`, confirming this is jax 0.4.18→0.8.0
+RNG/dependency drift, not a regression introduced by this branch.
+Regenerated the frozen expected values in `tests/test_golden_loss_fn.py`
+and `tests/test_update_hdf_golden.py` against `.venv-unity`; full
+17-test suite now passes under it.
+
+Per the project owner's decision, dropped the old local dev
+environment entirely (it no longer has a purpose now that
+`.venv-unity` matches production): deleted `requirements-dev.txt` and
+`.venv/`, updated `dev/architecture.md`/`CHANGELOG.md` to point at
+`.venv-unity`/`requirements.txt` as the one documented dev/test
+environment going forward. Full details in
+`dev/known-issues.md`'s issue #5 entry ("Update 2026-11-17").
+
 ### Clarified BirdFlowPipeline test suite's coverage and merge bar
 
 Project owner confirmed `BirdFlowPipeline`'s suite doesn't exercise

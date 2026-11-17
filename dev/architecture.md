@@ -346,10 +346,14 @@ the code, is genuinely shared across users.
   except for the two new `flow_l2`-related keys the registry now always
   computes.
 
-Run with `.venv/bin/python -m pytest tests/` (see `requirements-dev.txt`
-for the pinned local-dev environment; this has not been verified against
-the Unity/`BirdFlowContainer` production environment — see
-`dev/worklog.md`'s `pluggable-loss-terms` entries).
+Run with `.venv-unity/bin/python -m pytest tests/` — a local venv
+pinned to `requirements.txt`, the dependency versions actually
+installed in `BirdFlowContainer` on Unity as of 2026-11-17 (see
+`dev/known-issues.md`'s issue #5 entry). The golden-value tests'
+frozen values are tied to that exact dependency stack (jax's RNG
+stream shifts enough between jax/numpy versions to break
+`rel=1e-5`-tolerance comparisons), so they must be run under
+`.venv-unity`, not an arbitrary local Python install.
 
 See `dev/known-issues.md` for issues identified during development
 but deliberately deferred rather than fixed.
@@ -367,5 +371,6 @@ and add a dated entry together when cutting a release.
 `jax`, `haiku` (`dm-haiku`), `optax`, `scipy` (pairwise distances in the
 unused `gen_d_matrix`-era code), `h5py` (HDF5 I/O), `numpy`. No
 `setup.py`/`pyproject.toml` — this is a loose script collection, not an
-installable package. `requirements-dev.txt` pins a local-dev-only test
-environment (see "Tests" above).
+installable package. `requirements.txt` pins the versions installed in
+the production container (see "Tests" above and
+`dev/known-issues.md`).

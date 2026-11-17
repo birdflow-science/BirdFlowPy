@@ -18,8 +18,8 @@ subprocess.run([sys.executable, "update_hdf.py", ...], ...)
 ```
 
 This only resolves correctly when pytest is run with the repo root as
-cwd (as documented: `.venv/bin/python -m pytest tests/` from the repo
-root). Running pytest from any other directory — a subdirectory, a
+cwd (as documented: `.venv-unity/bin/python -m pytest tests/` from the
+repo root). Running pytest from any other directory — a subdirectory, a
 CI runner that `cd`s elsewhere first — makes this fail with
 `FileNotFoundError`. The same underlying issue affects `conftest.py`'s
 `from flow_model_training import ...` at collection time, confirmed by
@@ -111,15 +111,15 @@ dependency versions BirdFlowPy actually needs or has been tested
 against in production — "whatever pip resolved at the last container
 build" is the only answer, and it silently changes on every rebuild.
 
-This repo's own `requirements-dev.txt` (added for this branch's local
-test suite) is pinned, but deliberately to an *older*, Python
-3.9-compatible stack for local development — not verified against,
-and now confirmed to diverge sharply from, the actual production
-environment. Running `dev/print_container_versions.sh` (added this
-session) inside the current container on Unity vs. the local `.venv`
-gave:
+This repo's original local test environment (`requirements-dev.txt`,
+since removed — see "Update 2026-11-17" below) was pinned, but
+deliberately to an *older*, Python 3.9-compatible stack for local
+development — not verified against, and found to diverge sharply
+from, the actual production environment. Running
+`dev/print_container_versions.sh` (added this session) inside the
+current container on Unity vs. that old local environment gave:
 
-| Package | Local `.venv` (Python 3.9) | Unity container (Python 3.13.9) |
+| Package | Old local env (Python 3.9) | Unity container (Python 3.13.9) |
 |---|---|---|
 | jax / jaxlib | 0.4.18 | 0.8.0 |
 | haiku | 0.0.10 | 0.0.15 |
@@ -128,15 +128,14 @@ gave:
 | h5py | 3.14.0 | 3.15.1 |
 | numpy | 1.26.4 | 2.3.4 |
 
-The numpy divergence is the sharpest: `requirements-dev.txt` pins
-`numpy<2` specifically for Python-3.9 compatibility, but production is
-on numpy 2.3.4. This means `pluggable-loss-terms`'s golden-value
+The numpy divergence was the sharpest: the old environment pinned
+`numpy<2` specifically for Python-3.9 compatibility, while production
+is on numpy 2.3.4. This meant `pluggable-loss-terms`'s golden-value
 regression tests (`tests/test_golden_loss_fn.py`,
-`tests/test_update_hdf_golden.py`) have only ever run against the
-numpy-1.x/jax-0.4/Python-3.9 combination locally, and have never
-exercised the numpy-2.x/jax-0.8/Python-3.13 combination that
-production actually runs — the verification already flagged as
-outstanding in `dev/worklog.md` before this branch merges.
+`tests/test_update_hdf_golden.py`) had only ever run against the
+numpy-1.x/jax-0.4/Python-3.9 combination locally, never the
+numpy-2.x/jax-0.8/Python-3.13 combination production actually runs.
+See "Update 2026-11-17" below for how this was resolved.
 
 Separately, issue #5's reported error
 (`jax.extend.core.JaxprEqn` missing) looks like a plausible
@@ -211,10 +210,7 @@ branch.
 1. **Make BirdFlowPy's own pinned versions the single source of
    truth**, rather than two independently drifting files. Added
    `requirements.txt` at the repo root (2026-11-17) recording the
-   table above as explicit pins — captured from the current container,
-   not yet verified as a working set end-to-end. `requirements-dev.txt`
-   keeps only dev-only additions (`pytest`) layered on top instead of
-   diverging silently. Still open: actually repointing
+   table above as explicit pins. Still open: actually repointing
    `BirdFlowContainer.def` to install Python dependencies *from*
    `requirements.txt` instead of its own inline `pip install --upgrade`
    lines — deliberately not done yet, since that requires an actual
@@ -247,6 +243,40 @@ need regenerating against whatever version set gets pinned
 (floating-point results can shift across jax/numpy versions even
 absent an API break) before this branch is considered verified for
 merge.
+
+### Update 2026-11-17: local environment now matches the container; golden tests regenerated
+
+Installed Python 3.13.18 locally (Homebrew) and created `.venv-unity`,
+`pip install -r requirements.txt pytest` — every package resolved to
+exactly the version pinned above, i.e. nothing in `requirements.txt`'s
+pin set conflicts with what's actually installable today. Ran
+`tests/` under `.venv-unity`: no import or API error (unlike issue
+#5's report) — `tests/test_loss_terms.py`'s hand-computed unit tests
+(no RNG) passed unchanged, but the three golden-value/snapshot tests
+(`test_golden_loss_dict`, `test_golden_fitted_params`,
+`test_update_hdf_golden_output`) failed, with numeric divergences too
+large to be rounding (e.g. a sign flip in a fitted parameter).
+
+Cross-checked via a `git worktree` at commit `dce4646` (the last
+commit before the `LOSS_TERMS` registry refactor, predating this
+branch entirely) running the same golden-value tests under
+`.venv-unity`: identical failure pattern. This confirms the
+divergence is RNG/dependency drift between jax 0.4.18 and 0.8.0 (most
+likely jax's PRNG stream implementation, used by
+`hk.initializers.RandomNormal()`), not anything introduced by the
+registry refactor. Regenerated the golden values in
+`tests/test_golden_loss_fn.py` and `tests/test_update_hdf_golden.py`
+against `.venv-unity`; full suite (17 tests) now passes under
+`.venv-unity`.
+
+Per the project owner's decision, dropped the old local dev
+environment entirely rather than keeping both: deleted
+`requirements-dev.txt` and `.venv/`, added `.venv-unity` to
+`.gitignore`. `.venv-unity`/`requirements.txt` is now the only
+documented local dev/test environment (see `dev/architecture.md`'s
+"Tests" section) — it can no longer run the now-stale old golden
+values (that environment doesn't exist anymore), which is fine since
+it was superseded rather than kept as an alternative.
 
 ## Record the package version in HDF5 output metadata
 

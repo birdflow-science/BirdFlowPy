@@ -8,8 +8,9 @@
 # "No pinned/tracked dependency versions for the production environment
 # (issue #5)" entry.
 #
-# NOT the same as requirements-dev.txt, which pins an older,
-# Python-3.9-compatible stack for local development only.
+# Install into a local venv (e.g. `.venv-unity`, Python 3.13) via
+# `pip install -r requirements.txt pytest` to run tests/ against a
+# stack matching production; see dev/architecture.md's "Tests" section.
 jax==0.8.0
 jaxlib==0.8.0
 dm-haiku==0.0.15

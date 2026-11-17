@@ -4,15 +4,23 @@ update_hdf.py is a script (argparse + top-level execution), not an
 importable module, so it's exercised here via subprocess, the same way
 it's actually invoked from the command line / from R.
 
-The expected values below were captured by running this exact fixture and
-invocation against the pre-refactor code (commit dce4646, the last commit
-before the Step 3 loss-term registry refactor -- see dev/workplan.md) and
-comparing key-by-key against a run of the current code with equivalent
-weights (default flow_l2_weight=0.0). That comparison found the two sets
-of output identical except for the two new flow_l2-related keys the
-registry always computes (expected, since flow_l2 is now part of
-LOSS_TERMS; see test_flow_l2_weight_zero_is_noop in
-test_golden_loss_fn.py for the same property at the loss_fn level).
+The expected values below were originally captured by running this exact
+fixture and invocation against the pre-refactor code (commit dce4646, the
+last commit before the Step 3 loss-term registry refactor -- see
+dev/workplan.md) and comparing key-by-key against a run of the current
+code with equivalent weights (default flow_l2_weight=0.0). That
+comparison found the two sets of output identical except for the two new
+flow_l2-related keys the registry always computes (expected, since
+flow_l2 is now part of LOSS_TERMS; see test_flow_l2_weight_zero_is_noop
+in test_golden_loss_fn.py for the same property at the loss_fn level).
+
+They were regenerated 2026-11-17 against `.venv-unity` (jax==0.8.0,
+dm-haiku==0.0.15, optax==0.2.6, numpy==2.3.4 -- the versions installed in
+BirdFlowContainer on Unity as of that date, see requirements.txt and
+dev/known-issues.md), after confirming (the same way as
+test_golden_loss_fn.py) that the original values no longer reproduced
+under the newer stack due to RNG/dependency drift rather than any code
+regression.
 """
 
 import glob
@@ -66,39 +74,39 @@ def test_update_hdf_golden_output(synthetic_hdf5_fixture):
 
     expected_loss_values = {
         "dist": [
-            0.2997113764286041,
-            0.29574722051620483,
-            0.2914019823074341,
-            0.2869254946708679,
-            0.2825625538825989,
+            0.2947274446487427,
+            0.29587891697883606,
+            0.297288179397583,
+            0.29854393005371094,
+            0.2995595633983612,
         ],
         "ent": [
-            2.3626461029052734,
-            2.4014925956726074,
-            2.4148306846618652,
-            2.409897804260254,
-            2.3965017795562744,
+            2.6726341247558594,
+            2.709975242614746,
+            2.727104663848877,
+            2.7285006046295166,
+            2.7205650806427,
         ],
         "flow_l2": [
-            0.27607813477516174,
-            0.24342674016952515,
-            0.22658443450927734,
-            0.2208499163389206,
-            0.22131529450416565,
+            0.1875382661819458,
+            0.17206059396266937,
+            0.16678723692893982,
+            0.1688559502363205,
+            0.17466774582862854,
         ],
         "obs": [
-            0.6907318830490112,
-            0.5573172569274902,
-            0.4501211643218994,
-            0.3656962513923645,
-            0.29921233654022217,
+            0.5620908141136169,
+            0.4655943214893341,
+            0.3895336091518402,
+            0.3302020728588104,
+            0.2818446755409241,
         ],
         "total": [
-            0.6934927105903625,
-            0.5600345730781555,
-            0.452793687582016,
-            0.36832451820373535,
-            0.3017983138561249,
+            0.5647708177566528,
+            0.4682821035385132,
+            0.3922337591648102,
+            0.33291468024253845,
+            0.2845682203769684,
         ],
     }
 
@@ -115,7 +123,7 @@ def test_update_hdf_golden_output(synthetic_hdf5_fixture):
     assert hyperparameters["obs_weight"] == pytest.approx(1.0)
 
     assert week1_to_2.shape == (6, 6)
-    assert week1_to_2[0, 0] == pytest.approx(0.0005380368093028665, rel=1e-4)
+    assert week1_to_2[0, 0] == pytest.approx(0.008624911308288574, rel=1e-4)
 
 
 def test_update_hdf_nonzero_flow_l2_weight_gets_distinct_filename(synthetic_hdf5_fixture):
