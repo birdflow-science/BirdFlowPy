@@ -27,12 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- `update_hdf.py`'s output filename (and `--save_pkl` filename) only
-  ever encoded the `obs`/`ent`/`dist`/`dist_pow` hyperparameters, so two
-  runs differing only in a newly added loss weight (e.g. `flow_l2_weight`)
-  produced the identical destination filename and silently overwrote
-  each other. Any loss weight beyond that historic trio is now appended
-  to the filename whenever it's nonzero.
 - `ent_loss`'s parameters were named backwards from what they actually
   received (`ent_loss(probs, flows)`, called as `ent_loss(flows,
   pred_densities)`); renamed to match actual usage. No change in
