@@ -278,6 +278,18 @@ documented local dev/test environment (see `dev/architecture.md`'s
 values (that environment doesn't exist anymore), which is fine since
 it was superseded rather than kept as an alternative.
 
+### Update 2026-11-17 (later): confirmed directly inside BirdFlowContainer on Unity
+
+Project owner ran `tests/` from an RStudio OnDemand terminal, i.e.
+directly inside `BirdFlowContainer.sif` rather than the local
+`.venv-unity` approximation: all 17 tests passed. This confirms
+`requirements.txt`'s pins genuinely match the container (not just a
+best-effort guess from `print_container_versions.sh`'s output) and
+that the regenerated golden values hold in the real production
+environment. Also ran `BirdFlowPipeline`'s suite against this branch
+(point 3 of the proposed direction below): passed. See
+`dev/worklog.md`'s "Verified on Unity" entry for the full writeup.
+
 ## Record the package version in HDF5 output metadata
 
 **Requested:** 2026-11-16, by the project owner (not a review finding).

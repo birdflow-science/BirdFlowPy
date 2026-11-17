@@ -20,6 +20,31 @@ recalling history; consult the archive only if the answer isn't here.
 
 ## 2026-11-17 — branch pluggable-loss-terms
 
+### Verified on Unity: tests/ passes inside BirdFlowContainer; BirdFlowPipeline suite passes
+
+Closes out the "outstanding before merge" item from this branch's
+first worklog entry below (running the regression suite inside
+`BirdFlowContainer` on Unity).
+
+Project owner ran `tests/` directly inside an RStudio OnDemand
+session's terminal (i.e. actually inside `BirdFlowContainer.sif`, not
+a local approximation) against a personal-clone checkout of this
+branch: all 17 tests passed, matching the `.venv-unity` run above.
+This is the authoritative confirmation that `.venv-unity`'s pinned
+versions (`requirements.txt`) genuinely match the container, and that
+the regenerated golden values hold in the real production
+environment, not just the local stand-in.
+
+Project owner also ran `BirdFlowPipeline`'s own test suite
+(`devtools::test()`) against this branch: passed. Per
+`dev/known-issues.md`'s issue #5 entry, that suite doesn't exercise
+this branch's new features (the `LOSS_TERMS` registry/`flow_l2`/new
+HDF5 fields) but does run full model fits, so this is a meaningful
+check that the branch doesn't break existing orchestration/fitting on
+Unity — consistent with this branch's stated merge bar (don't break
+the existing workflow; new-feature bugs are expected and acceptable
+for now).
+
 ### Matched local dev environment to the Unity container; regenerated golden tests; dropped the old environment
 
 Installed Python 3.13.18 (Homebrew) and created `.venv-unity`, pinned
