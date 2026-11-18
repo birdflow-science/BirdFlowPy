@@ -20,6 +20,34 @@ recalling history; consult the archive only if the answer isn't here.
 
 ## 2026-11-17 — branch pluggable-loss-terms
 
+### Checked for a performance regression in BirdFlowPipeline's grid-fit runtimes
+
+Project owner noticed some fits under this branch (run via
+`BirdFlowPipeline`'s test suite, which launches many SLURM jobs) took
+noticeably longer than under the pre-branch code, and compared SLURM
+job timings via `sacct --format=JobID,JobName,Start,State,Elapsed`
+across two 225-job grid-fit runs (one per code version; saved
+temporarily as `dev/old_grid_fits.txt`/`dev/new_grid_fits.txt`, since
+deleted).
+
+Matched the 225 array-task job IDs by index and compared `Elapsed`
+times: mean 71.2s (old) vs. 73.5s (new), median 68.0s vs. 68.0s
+(identical), per-job diff mean +2.3s but stdev 23.6s — the variance
+dominates the mean. Individual jobs swung up to ~2x slower and ~2x
+faster in both directions, but the slowdowns and speedups each
+clustered by job-index range (i.e. by which array-task batch/node
+they landed on), consistent with normal heterogeneous-cluster
+node-assignment variance rather than anything introduced by the
+loss-term registry refactor. The project owner also noted the full
+test suite (most of which doesn't exercise the Python fitting path at
+all) ran 1266.8s (new) vs. 1186.6s (old), a ~7% difference consistent
+with the same noise.
+
+Conclusion: no evidence of a performance regression from this branch.
+Not written up as a known issue since nothing is open or unresolved —
+recorded here as a closed investigation in case the question comes up
+again later.
+
 ### Verified on Unity: tests/ passes inside BirdFlowContainer; BirdFlowPipeline suite passes
 
 Closes out the "outstanding before merge" item from this branch's
