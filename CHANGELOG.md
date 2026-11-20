@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `flow_l2` loss term (L2 penalty on the flow matrices) and a
   `--flow_l2_weight` CLI flag in `update_hdf.py`, default `0.0`, as a
   worked example of the registry mechanism.
+- `smooth` loss term (second-difference/curvature penalty, open
+  boundary, on the model's fitted weekly marginals) and a
+  `--smooth_weight` CLI flag in `update_hdf.py`, default `0.0`.
+  Penalizes spurious week-to-week movement driven by noise in the
+  input abundance rasters, without penalizing steady migratory drift.
+  See `dev/architecture.md` ([issue
+  #7](https://github.com/birdflow-science/BirdFlowPy/issues/7)).
 - `tests/` (pytest) covering `flow_model_training.py` and
   `update_hdf.py`, including golden-value regression tests and an
   end-to-end test of `update_hdf.py` against a synthetic HDF5 fixture.

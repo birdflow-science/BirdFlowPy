@@ -30,6 +30,7 @@ parser.add_argument('--obs_weight', help='Weight on the observation term of the 
 parser.add_argument('--dist_weight', help='Weight on the distance penalty in the loss', default=1e-2, type=float)
 parser.add_argument('--ent_weight', help='Weight on the joint entropy of the model', default=1e-4, type=float)
 parser.add_argument('--flow_l2_weight', help='Weight on the L2 penalty on the flow matrices', default=0.0, type=float)
+parser.add_argument('--smooth_weight', help='Weight on the temporal smoothness (curvature) penalty on the weekly marginals', default=0.0, type=float)
 parser.add_argument('--dist_pow', help='The exponent of the distance penalty', default=0.4, type=float)
 parser.add_argument("--dont_normalize", action="store_true", help="don't normalize distance matrix")
 parser.add_argument('--learning_rate', help='Learning rate for Adam optimizer', default=0.1, type=float)
@@ -46,6 +47,7 @@ loss_weights = {
     'dist': args.dist_weight,
     'ent': args.ent_weight,
     'flow_l2': args.flow_l2_weight,
+    'smooth': args.smooth_weight,
 }
 extra_weights_suffix = extra_weight_filename_suffix(loss_weights)
 
@@ -79,7 +81,8 @@ loss_fn = jit(partial(loss_fn,
                       cells=cells,
                       true_densities=masked_densities,
                       d_matrices=distance_matrices,
-                      weights=loss_weights))
+                      weights=loss_weights,
+                      masks=masks))
 
 # Run Training and get params and losses
 params, loss_dict = train_model(loss_fn,

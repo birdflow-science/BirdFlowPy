@@ -308,3 +308,114 @@ __version__` and write it as a dataset under `metadata/` (e.g.
 `birdflow_model_date` write. Should also be covered by
 `tests/test_update_hdf_golden.py`'s expected-output assertions once
 added.
+
+## `LOSS_TERMS` scale inconsistently with active-cell count, which weakens weight transfer across species
+
+**Found:** 2026-11-20, planning the issue #7 temporal-smoothing term
+(`dev/workplan.md`).
+
+`obs_loss`, `distance_loss`, `ent_loss`, and `flow_l2_loss`
+(`flow_model_training.py`) are all unnormalized `jnp.sum`s, but they
+don't scale the same way with a species' active-cell count `C` (which
+at this project's standard fixed 100km resolution varies enormously
+species to species):
+
+- **`distance_loss`** — already addressed; this one's scaling was
+  fixed previously (not re-verified here, per the project owner).
+- **`ent_loss`** — bounded by `log(C)`, since entropy of a
+  distribution over `C` cells can't exceed `log(C)`. Logarithmic, not
+  linear — the mildest of the four, already close to self-normalizing
+  in practice.
+- **`obs_loss`** and **`flow_l2_loss`** — both sums of squared entries
+  from a vector/matrix that's itself constrained to sum to ~1
+  (density, flow mass). How these scale with `C` depends on whether a
+  species' density stays equally "spread out" relative to its own
+  range as `C` grows (in which case these shrink roughly like `1/C`)
+  or concentrates into a roughly fixed number of hotspot cells
+  regardless of total range size (in which case they stay roughly
+  constant in `C`). Not determinable from the formulas alone — real
+  BirdFlow densities are probably somewhere between the two extremes,
+  and which regime dominates is an open empirical question (see "Note
+  on empirically estimating scaling" below).
+
+This matters because weights aren't always refit per species: the
+project owner confirmed a substantial chunk of species get their loss
+weights *transferred* from a similar species rather than independently
+tuned via grid search. A transferred weight implicitly assumes the
+term it multiplies means roughly the same thing (same effective
+strength) on both species — which isn't guaranteed when a term's raw
+magnitude depends on `C` in an uncontrolled way.
+
+The new `smooth_loss` term being added for issue #7 (a sum of squared
+second differences on a density-shaped vector — the same mathematical
+family as `obs_loss`/`flow_l2_loss`) is, for now, **also left
+unnormalized** (raw `jnp.sum`), explicitly deferring the earlier plan
+to normalize it by `T * total_cells`. Reasoning: since `smooth_loss`
+is in the same family as `obs_loss`, it likely scales with `C`
+similarly to `obs_loss` — and `obs_loss` is the term `smooth_loss`
+most directly competes against in the objective. Normalizing only
+`smooth_loss` while leaving `obs_loss` raw could decouple their
+relative scaling and make the obs/smooth *ratio* (which is what
+actually governs the fitted model's smoothness-vs-fidelity tradeoff)
+transfer worse across species, not better. What matters for transfer
+is that ratio staying stable across species, not any single term
+being independently cell-count-invariant. See
+`dev/workplan.md` for the fuller discussion.
+
+**Fix (not yet applied, needs a decision, and needs the empirical
+question above answered first):** once the actual scaling behavior of
+`obs_loss`/`ent_loss`/`flow_l2_loss` (and prospectively `smooth_loss`)
+is known, decide whether to normalize some or all of them together
+for consistency and better transfer behavior. Doing this for any one
+of them in isolation risks making things worse, per the reasoning
+above — if it happens, it should happen as one coordinated change
+across all the same-family terms. This would also be a breaking
+change to the meaning of existing `obs_weight`/`ent_weight`/
+`flow_l2_weight` values and would require re-deriving or re-fitting
+weights for every species currently using transferred values.
+
+**Note on empirically estimating scaling:** the project has a large
+trove of existing grid-search output with performance metrics per
+fitted model, spanning many species (and therefore many active-cell
+counts) at the fixed 100km resolution. That data could be mined
+directly to estimate how `obs_loss`/`ent_loss`/`flow_l2_loss` actually
+scale with `C` in practice, rather than reasoning about it from the
+loss formulas alone — turning the open empirical question above into
+a concrete analysis rather than a guess, before committing to any
+normalization change.
+
+## `smooth_loss` treats absence and insufficient data as the same "true zero"
+
+**Found:** 2026-11-20, implementing the issue #7 temporal-smoothing
+term (`dev/workplan.md`, `dev/architecture.md`).
+
+`smooth_loss` (`flow_model_training.py`) embeds each week's compact
+marginal into the full canonical cell space via that week's
+`dynamic_mask`, treating any cell outside the mask as **true zero**
+density for that week. Per the project owner, a cell can land outside
+a week's `dynamic_mask` for two different reasons that the mask alone
+doesn't distinguish:
+
+1. The underlying eBird S&T model predicted (near-)zero density there,
+   or the location is simply unsuitable for the species (e.g. ocean for
+   a forest bird) — genuinely zero, confidently.
+2. eBird S&T didn't have enough data to make a prediction at all (the
+   owner's example: much of the Amazon basin) — unknown, not zero,
+   even though it's recorded the same way as case 1 today.
+
+The project is aware of this distinction (it now tracks whether a
+model made a prediction at all, separately from the prediction's
+value) but `smooth_loss` doesn't use that finer-grained information —
+it was deliberately built simple first, per the owner's explicit
+direction, with true-zero for both cases as the starting point.
+
+**Fix (not yet applied, needs a decision):** the owner floated that
+`smooth_loss` could instead help *impute* case-2 gaps — e.g. by
+treating unknown-cell curvature as unconstrained (no penalty either
+way) rather than penalizing it against an assumed zero, or by letting
+the smoothness term itself interpolate a plausible value for a
+cell that's missing one week but present on either side. This would
+need the finer-grained "did the model run here at all" signal plumbed
+through from the HDF5 into `smooth_loss` (currently only the single
+boolean `dynamic_mask` is passed in), and a decision on the specific
+mechanism, before implementing.

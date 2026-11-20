@@ -101,6 +101,13 @@ def test_update_hdf_golden_output(synthetic_hdf5_fixture):
             0.3302020728588104,
             0.2818446755409241,
         ],
+        "smooth": [
+            0.2979072332382202,
+            0.2507886290550232,
+            0.27094918489456177,
+            0.34149613976478577,
+            0.4368355870246887,
+        ],
         "total": [
             0.5647708177566528,
             0.4682821035385132,
@@ -118,6 +125,7 @@ def test_update_hdf_golden_output(synthetic_hdf5_fixture):
             assert a == pytest.approx(e, rel=1e-4)
 
     assert hyperparameters["flow_l2_weight"] == pytest.approx(0.0)
+    assert hyperparameters["smooth_weight"] == pytest.approx(0.0)
     assert hyperparameters["dist_weight"] == pytest.approx(0.01)
     assert hyperparameters["ent_weight"] == pytest.approx(0.0001)
     assert hyperparameters["obs_weight"] == pytest.approx(1.0)
@@ -148,3 +156,24 @@ def test_update_hdf_nonzero_flow_l2_weight_gets_distinct_filename(synthetic_hdf5
 
     with h5py.File(nonzero_path, "r") as f:
         assert f["metadata/hyperparameters/flow_l2_weight"][()] == pytest.approx(2.5)
+
+
+def test_update_hdf_nonzero_smooth_weight_gets_distinct_filename(synthetic_hdf5_fixture):
+    """Same collision-avoidance property as flow_l2 above, for the new
+    smooth_weight flag."""
+    root, species, resolution, ebirdst_year = synthetic_hdf5_fixture
+
+    default_path = _run_update_hdf(root, species, resolution, ebirdst_year)
+    nonzero_path = _run_update_hdf(
+        root, species, resolution, ebirdst_year, extra_args=["--smooth_weight", "3.0"]
+    )
+
+    assert default_path != nonzero_path
+    assert os.path.exists(default_path)
+    assert os.path.exists(nonzero_path)
+    assert os.path.basename(nonzero_path) == (
+        f"{species}_{ebirdst_year}_{resolution}km_obs1.0_ent0.0001_dist0.01_smooth3.0_pow0.4.hdf5"
+    )
+
+    with h5py.File(nonzero_path, "r") as f:
+        assert f["metadata/hyperparameters/smooth_weight"][()] == pytest.approx(3.0)

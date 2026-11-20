@@ -1,10 +1,16 @@
 # BirdFlowPy architecture
 
-This is a from-scratch summary of how the four top-level scripts fit together,
+This is a from-scratch summary of how the top-level scripts fit together,
 written for someone who knows the BirdFlowR model/data structures but not JAX
-or Haiku. It reflects the state of the code as of commit `de0d77d` (2026-11-16),
-updated for the loss-term registry refactor on branch `pluggable-loss-terms`
-(see `dev/workplan.md`).
+or Haiku. It was initially based on the state of the code as of commit
+`de0d77d` (2026-11-16). Subsequent updates:
+
+* Loss-term registry refactor on branch `pluggable-loss-terms` (2026-11-17)
+* `smooth` (temporal-smoothness) loss term added on branch
+  `7-temporal-smoothing` (edited 2026-11-21)
+
+Detailed plans are stored within each branch in `dev/workplan.md` and later
+moved to the top of `dev/worklog.md` before merging.
 
 ## The four files and how they relate
 
@@ -33,6 +39,39 @@ whole forward simulation (initial distribution → week-by-week flow) is
 written as a differentiable JAX computation, so standard gradient-based
 optimizers (Adam, via `optax`) can fit all the transition matrices jointly
 against a single scalar loss.
+
+## Weeks are a linear chain, not a circular one
+
+Though BirdFlow models an annual migratory cycle, nothing in this codebase
+treats the sequence of weeks it receives as a true ring — `BirdFlowR::
+preprocess_species()` already linearizes the annual cycle before this code
+ever sees the data. For a full-year model, it duplicates week 1's target
+distribution as an extra final week, so what arrives here is a linear
+chain whose real annual wrap is encoded entirely in that duplicated final
+week, not something any function in this repo needs to reconstruct by
+wrapping indices itself. The rarer non-full-year, subset-of-weeks case is
+likewise a genuine, shorter linear span with no wrap either way.
+
+This isn't just a convenience for any one function — it's what lets
+`FlowModel` itself (`flow_model.py`) be a plain linear chain, with no
+circular-transition code anywhere in this repo. `FlowModel.__call__`
+builds exactly `num_weeks - 1` `FlowBlock` transitions, walking forward
+from `d0` (week 1) to the last week and never back; there's no block
+anywhere computing a last-week-to-week-1 transition. If the annual wrap
+weren't already linearized upstream, that transition would have to be
+modeled explicitly — an extra `FlowBlock` (or equivalent) closing the
+loop back to week 1 — rather than only showing up implicitly through
+loss terms that compare across weeks.
+
+Within that already-linear model, cross-week *loss* terms still have
+their own boundary question: does a term that compares multiple weeks'
+values treat week 0 and the last week as adjacent (circular) or not
+(open)? Currently `smooth_loss` (see "Loss components" below) is the
+only loss term that looks across weeks rather than operating on each one
+independently, so it's the only place this choice shows up today. No
+cross-week term is computed at week 0 or the last week. Any future loss
+term (or other code) that looks across adjacent weeks should follow this
+same open-boundary convention rather than reintroduce circularity.
 
 ## `flow_model.py` — model definition
 
@@ -128,9 +167,9 @@ directly:
 
 Loss terms are no longer hardcoded into `loss_fn`'s signature and return
 value. Every term function shares one signature —
-`term_fn(pred_densities, flows, true_densities, d_matrices) -> scalar` —
-even where it ignores most of the arguments, and a module-level dict,
-`LOSS_TERMS`, maps a term's name to `(sign, term_fn)`:
+`term_fn(pred_densities, flows, true_densities, d_matrices, masks) ->
+scalar` — even where it ignores most of the arguments, and a
+module-level dict, `LOSS_TERMS`, maps a term's name to `(sign, term_fn)`:
 
 ```python
 LOSS_TERMS = {
@@ -138,15 +177,16 @@ LOSS_TERMS = {
     'dist': (1.0, distance_loss),
     'ent': (-1.0, ent_loss),
     'flow_l2': (1.0, flow_l2_loss),
+    'smooth': (1.0, smooth_loss),
 }
 ```
 
 `sign` is `+1` for a term that's penalized (pushes the loss up — obs,
-dist, flow_l2) and `-1` for a term that's rewarded (entropy; higher
-entropy is desirable, so it's *subtracted*). `loss_fn(params, cells,
-true_densities, d_matrices, weights)` takes a `weights` dict
-(`{'obs': ..., 'dist': ...}`, one float per term name you want nonzero —
-any name not present defaults to weight `0.0`) and loops over
+dist, flow_l2, smooth) and `-1` for a term that's rewarded (entropy;
+higher entropy is desirable, so it's *subtracted*). `loss_fn(params,
+cells, true_densities, d_matrices, weights, masks)` takes a `weights`
+dict (`{'obs': ..., 'dist': ...}`, one float per term name you want
+nonzero — any name not present defaults to weight `0.0`) and loops over
 `LOSS_TERMS`, computing every term's value and summing `sign * weight *
 value` into the total. It returns `(total, components)`, where
 `components` is a dict of every term's raw (unweighted) value — so
@@ -168,10 +208,41 @@ The individual terms:
   "marginal-minus-joint" entropy regularizer that shows up in BirdFlowR's
   math for discouraging degenerate (too-concentrated or too-diffuse)
   transition distributions.
-- `flow_l2_loss` — `sum(flow ** 2)` across all weeks' flow matrices, an L2
-  penalty directly on the flow amounts. This is a worked example added to
-  prove the registry mechanism, not a term in active scientific use yet —
-  its default weight is `0.0`, i.e. off.
+- `flow_l2_loss` — a dummy term, added only to demonstrate and test the
+  modularity introduced for the upcoming 1.2.0 release not for
+  scientific use. Its default weight is `0.0`, i.e. off.
+- `smooth_loss` — a second-difference (curvature) penalty on the model's
+  own fitted weekly marginals, added for
+  [issue #7](https://github.com/birdflow-science/BirdFlowPy/issues/7) to
+  discourage spurious week-to-week movement driven by noise in the input
+  abundance rasters: a single noisy week can no longer unilaterally force
+  a detour in the fitted model without also increasing this term.
+
+  Equivalently, per cell: linearly extrapolate abundance from weeks
+  `t-1` and `t` to predict week `t+1`, then square the difference
+  between that extrapolated value and the actual (fitted) value at
+  `t+1`, summed across all cells and all interior weeks. A cell whose
+  abundance changes at a constant rate (steady migratory drift)
+  extrapolates perfectly and costs nothing; a noise-driven
+  spike-then-revert does not extrapolate and costs more.
+
+  It uses an **open boundary** (no term at week 0 or the last week) —
+  see "Weeks are a linear chain, not a circular one" above for why. Like
+  `flow_l2_loss`, its default weight is `0.0`, i.e. off. Unlike the
+  normalized penalty sketched in issue #7's discussion, this
+  implementation sums raw (unnormalized) squared curvature, matching
+  `obs_loss`/`ent_loss`/`flow_l2_loss`'s existing convention rather than
+  introducing a differently-scaled term — see `dev/known-issues.md`'s
+  entry on `LOSS_TERMS` cell-count scaling for why, and why it's a
+  cross-term decision rather than one to make for `smooth_loss` alone.
+
+  **Mask semantics**: a cell outside a given week's `dynamic_mask` can
+  mean either "the species genuinely isn't there" or "eBird S&T didn't
+  have enough data to predict either way" — `smooth_loss` currently
+  can't distinguish these and treats both as true zero. See
+  `dev/known-issues.md` for the deferred follow-up (using the smoothing
+  term to help impute genuine data gaps) and why true-zero was chosen as
+  the simpler starting point.
 
 Adding a new additive loss term going forward means: write a function
 matching the shared signature, add one `name: (sign, term_fn)` entry to
@@ -186,7 +257,8 @@ Not every tunable in `update_hdf.py` is a loss-term weight, and it's worth
 distinguishing the three kinds that exist or are anticipated:
 
 1. **Loss term weights** — tracked by `LOSS_TERMS` as above (`obs`,
-   `dist`, `ent`, `flow_l2`). Mechanism: `--<name>_weight`, default `0.0`.
+   `dist`, `ent`, `flow_l2`, `smooth`). Mechanism: `--<name>_weight`,
+   default `0.0`.
 2. **Other numeric parameters that aren't loss weights** — e.g.
    `--dist_pow` and `--dont_normalize`, which transform the raw distance
    vector *before* `mask_input` builds the per-week `distance_matrices`
@@ -282,47 +354,45 @@ API) before they'd run against the current code.
 ## Running on Unity, and testing an unmerged branch there
 
 Production fitting runs inside `BirdFlowContainer` (a separate repo) on
-Unity. That container only supplies the shared **environment** —
+Unity. That container supplies the shared **environment** —
 conda/Python, R, and pinned libraries (`jax[cuda12]`, `dm-haiku`,
-`optax`, `h5py`, etc.) via `BirdFlowContainer.sif` — it does not bake in
-a copy of this repo's code. Per `BirdFlowContainer`'s own README, you
-launch the shared `.sif` through Unity OnDemand's RStudio IDE, then
-open whatever local clone of BirdFlowPy you want as the RStudio
-project; `update_hdf.py` runs out of that directory against the
-container's environment. Code and environment are already decoupled
-per user.
+`optax`, `h5py`, etc.) via `BirdFlowContainer.sif` — the container
+does not bake in a copy of this repo's code.
 
-That means testing an unmerged feature branch on Unity — without
-affecting other users or rebuilding the container — only requires
-checking the branch out into its own directory and pointing a
-RStudio session at it, e.g. from an existing BirdFlowPy clone on
-Unity:
+Instead, `BirdFlowPipeline::the$python_repo_path` sets the repo path.
+The path is stored in an R environment on package load, so it's user
+configurable within an R session, BUT there's no mechanism to change
+it from the default within tasks launched on SLURM, so currently
+changing it in the RStudio session will NOT change it in launched
+tasks.
 
-```bash
-git worktree add ../BirdFlowPy-<branch-name> <branch-name>
-```
+As of 2026-11-21 my workflow is:
 
-A worktree is preferable to a second full clone: same repo/object
-store, just a second directory checked out to a different ref, no
-separate remote to keep in sync. Then in RStudio, open
-`BirdFlowPy-<branch-name>/` as the project instead of your usual
-checkout. Other users' sessions, pointed at their own (presumably
-`main`) checkouts, are unaffected.
+**Configure:**
 
-When `update_hdf.py` is instead driven through `BirdFlowPipeline`
-(the R package that orchestrates batch preprocessing/model
-fits/downstream R processing on the cluster) rather than opened
-directly as an RStudio project, the directory it runs
-`update_hdf.py` out of is controlled by
-`BirdFlowPipeline::the$python_repo_path`, not by whatever RStudio
-project happens to be open. To point a `BirdFlowPipeline`-driven run
-at an unmerged branch's worktree instead of the default checkout,
-update that path accordingly.
+1. Clone **BirdFlowPy** into `~/BirdFlowPy` and check out desired branch.
+2. Clone a copy of **BirdFlowPipeline** into my home directory,
+   add and checkout a local branch `override-python-repo`.
+   Edit `R/the.R` to set `the$python_repo_path` to `~/BirdFlowPy`.
+   Don't push this branch.
+3. Rebuild and install **BirdFlowPipeline** (at the default user level).
 
-This only breaks down if a branch needs a dependency the image
-doesn't already have — then the shared environment itself needs a
-rebuild (see `BirdFlowContainer`'s README), since that part, unlike
-the code, is genuinely shared across users.
+**Test BirdFlowPy development:**
+
+1. Fetch changes to `~/BirdFlowPy`, checkout desired branch.
+2. Test.
+
+**Production:**
+
+1. Checkout main or `v1.1.0`.
+2. Fit models.
+
+**Update BirdFlowPipeline**:
+
+1. Fetch (`~/BirdFlowPipeline`)
+2. Merge main into `override-python-repo`
+
+All other users are always using the standard shared copy of the repo as configured in the main branch of **BirdFlowPipeline**.
 
 ## Tests
 
@@ -345,6 +415,15 @@ the code, is genuinely shared across users.
   on the identical fixture, which confirmed the output is identical
   except for the two new `flow_l2`-related keys the registry now always
   computes.
+
+Adding the `smooth` term (branch `7-temporal-smoothing`) followed the
+same playbook: rerunning the golden-value tests with `smooth_weight` at
+its default `0.0` reproduced every pre-existing expected value exactly
+(`total`/`obs`/`dist`/`ent`/`flow_l2`/fitted-params in
+`test_golden_loss_fn.py`; the output filename, `marginals`,
+`loss_values`, and `hyperparameters` in `test_update_hdf_golden.py`),
+confirming the new term is a true no-op at its default weight; only the
+new `smooth` key itself was added to each test's expected-values dict.
 
 Run with `.venv-unity/bin/python -m pytest tests/` — a local venv
 pinned to `requirements.txt`, the dependency versions actually

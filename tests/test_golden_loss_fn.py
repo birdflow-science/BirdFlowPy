@@ -36,7 +36,7 @@ LEARNING_RATE = 0.1
 
 
 def _run(small_training_fixture, weights):
-    dtuple, d_matrices, masked_densities, cells = small_training_fixture
+    dtuple, d_matrices, masked_densities, cells, masks = small_training_fixture
 
     bound_loss_fn = jit(
         partial(
@@ -45,6 +45,7 @@ def _run(small_training_fixture, weights):
             true_densities=masked_densities,
             d_matrices=d_matrices,
             weights=weights,
+            masks=masks,
         )
     )
 
@@ -58,11 +59,13 @@ def _run(small_training_fixture, weights):
 
 DEFAULT_WEIGHTS = {'obs': OBS_WEIGHT, 'dist': DIST_WEIGHT, 'ent': ENT_WEIGHT}
 
-# flow_l2 is always computed (it's part of LOSS_TERMS) but excluded from
-# DEFAULT_WEIGHTS here, i.e. given an implicit weight of 0.0 by loss_fn's
-# weights.get(name, 0.0) default -- this is what "off by default" means in
-# practice, and is exercised explicitly by test_flow_l2_weight_zero_is_noop
-# and test_flow_l2_nonzero_weight_changes_loss below.
+# flow_l2 and smooth are always computed (they're part of LOSS_TERMS) but
+# excluded from DEFAULT_WEIGHTS here, i.e. given an implicit weight of 0.0
+# by loss_fn's weights.get(name, 0.0) default -- this is what "off by
+# default" means in practice, and is exercised explicitly by
+# test_flow_l2_weight_zero_is_noop/test_flow_l2_nonzero_weight_changes_loss
+# and test_smooth_weight_zero_is_noop/test_smooth_nonzero_weight_changes_loss
+# below.
 
 
 def test_golden_loss_dict(small_training_fixture):
@@ -103,6 +106,13 @@ def test_golden_loss_dict(small_training_fixture):
             0.22119182348251343,
             0.21138572692871094,
             0.2066185027360916,
+        ],
+        "smooth": [
+            0.4424588680267334,
+            0.26704347133636475,
+            0.15511305630207062,
+            0.0979769378900528,
+            0.07124822586774826,
         ],
     }
 
@@ -148,6 +158,29 @@ def test_flow_l2_nonzero_weight_changes_loss(small_training_fixture):
 
     _, loss_dict_default = _run(small_training_fixture, DEFAULT_WEIGHTS)
     _, loss_dict_with_term = _run(small_training_fixture, weights_with_flow_l2)
+
+    assert loss_dict_with_term["total"][0] != pytest.approx(
+        loss_dict_default["total"][0]
+    )
+
+
+def test_smooth_weight_zero_is_noop(small_training_fixture):
+    """smooth is computed either way; explicitly weighting it at 0.0 must
+    produce identical results to omitting it from the weights dict (the
+    default-weights case above)."""
+    weights_with_explicit_zero = dict(DEFAULT_WEIGHTS, smooth=0.0)
+
+    _, loss_dict_default = _run(small_training_fixture, DEFAULT_WEIGHTS)
+    _, loss_dict_explicit = _run(small_training_fixture, weights_with_explicit_zero)
+
+    assert loss_dict_default["total"] == loss_dict_explicit["total"]
+
+
+def test_smooth_nonzero_weight_changes_loss(small_training_fixture):
+    weights_with_smooth = dict(DEFAULT_WEIGHTS, smooth=1.0)
+
+    _, loss_dict_default = _run(small_training_fixture, DEFAULT_WEIGHTS)
+    _, loss_dict_with_term = _run(small_training_fixture, weights_with_smooth)
 
     assert loss_dict_with_term["total"][0] != pytest.approx(
         loss_dict_default["total"][0]
