@@ -22,6 +22,12 @@ It should be up to date with the latest versions of those libraries
 
 For an example of how to run the code, see the jupyter notebook birdflow_demo.ipynb 
 
+## Versioning
+
+This project's version is tracked in `_version.py`
+(`from _version import __version__`). See `CHANGELOG.md` for release
+notes.
+
 ## Help
 
 For any questions or help, contact Miguel Fuentes at mmfuentes@umass.edu

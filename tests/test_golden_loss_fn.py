@@ -1,0 +1,154 @@
+"""Golden-value regression tests.
+
+These freeze the exact numeric output of today's loss_fn/train_model on a
+small fixed synthetic dataset with a fixed RNG seed. They exist so the
+Step 3 registry refactor (see dev/workplan.md) can be checked against
+these same expected values afterward with default weights, to confirm the
+restructuring alone produced no numeric change.
+
+The expected values below were regenerated 2026-11-17 against
+`.venv-unity` (jax==0.8.0, dm-haiku==0.0.15, optax==0.2.6, numpy==2.3.4
+-- the versions installed in BirdFlowContainer on Unity as of that date,
+see requirements.txt and dev/known-issues.md). The original values,
+generated against the older jax==0.4.18/dm-haiku==0.0.10 local-dev stack,
+no longer reproduced under the newer stack -- confirmed (via a worktree
+at commit dce4646, pre-dating the registry refactor) to be RNG/dependency
+drift rather than any code regression: the same divergence appears
+running this exact test against pre-refactor code, so it isn't something
+the refactor introduced.
+"""
+
+from functools import partial
+
+import haiku as hk
+import optax
+import pytest
+from jax import jit
+
+from flow_model_training import loss_fn, train_model
+
+OBS_WEIGHT = 1.0
+DIST_WEIGHT = 0.1
+ENT_WEIGHT = 0.01
+TRAINING_STEPS = 5
+RNG_SEED = 0
+LEARNING_RATE = 0.1
+
+
+def _run(small_training_fixture, weights):
+    dtuple, d_matrices, masked_densities, cells = small_training_fixture
+
+    bound_loss_fn = jit(
+        partial(
+            loss_fn,
+            cells=cells,
+            true_densities=masked_densities,
+            d_matrices=d_matrices,
+            weights=weights,
+        )
+    )
+
+    key = hk.PRNGSequence(RNG_SEED)
+    optimizer = optax.adam(LEARNING_RATE)
+
+    return train_model(
+        bound_loss_fn, optimizer, TRAINING_STEPS, cells, dtuple.weeks, key
+    )
+
+
+DEFAULT_WEIGHTS = {'obs': OBS_WEIGHT, 'dist': DIST_WEIGHT, 'ent': ENT_WEIGHT}
+
+# flow_l2 is always computed (it's part of LOSS_TERMS) but excluded from
+# DEFAULT_WEIGHTS here, i.e. given an implicit weight of 0.0 by loss_fn's
+# weights.get(name, 0.0) default -- this is what "off by default" means in
+# practice, and is exercised explicitly by test_flow_l2_weight_zero_is_noop
+# and test_flow_l2_nonzero_weight_changes_loss below.
+
+
+def test_golden_loss_dict(small_training_fixture):
+    _, loss_dict = _run(small_training_fixture, DEFAULT_WEIGHTS)
+
+    expected = {
+        "total": [
+            0.9155591130256653,
+            0.8495512008666992,
+            0.7984475493431091,
+            0.7571355700492859,
+            0.7193999290466309,
+        ],
+        "obs": [
+            0.2749156355857849,
+            0.2149728685617447,
+            0.18433129787445068,
+            0.16227987408638,
+            0.1444091647863388,
+        ],
+        "dist": [
+            6.48779821395874,
+            6.427428245544434,
+            6.225619792938232,
+            6.034139633178711,
+            5.835620403289795,
+        ],
+        "ent": [
+            0.8136333227157593,
+            0.8164505958557129,
+            0.8445732593536377,
+            0.8558292388916016,
+            0.8571270704269409,
+        ],
+        "flow_l2": [
+            0.2578813135623932,
+            0.241805300116539,
+            0.22119182348251343,
+            0.21138572692871094,
+            0.2066185027360916,
+        ],
+    }
+
+    assert loss_dict.keys() == expected.keys()
+    for key, expected_values in expected.items():
+        actual_values = loss_dict[key]
+        assert len(actual_values) == len(expected_values)
+        for actual, exp in zip(actual_values, expected_values):
+            assert actual == pytest.approx(exp, rel=1e-5)
+
+
+def test_golden_fitted_params(small_training_fixture):
+    params, _ = _run(small_training_fixture, DEFAULT_WEIGHTS)
+
+    z0 = params["Flow_Model/Initial_Params"]["z0"]
+    expected_z0 = [
+        -0.8366156220436096,
+        -0.17830951511859894,
+        -0.15418915450572968,
+        -0.7089557647705078,
+    ]
+    for actual, exp in zip(z0.tolist(), expected_z0):
+        assert actual == pytest.approx(exp, rel=1e-5)
+
+    week1_z00 = float(params["Flow_Model/Week_1"]["z"][0, 0])
+    assert week1_z00 == pytest.approx(0.18503859639167786, rel=1e-5)
+
+
+def test_flow_l2_weight_zero_is_noop(small_training_fixture):
+    """flow_l2 is computed either way; explicitly weighting it at 0.0 must
+    produce identical results to omitting it from the weights dict (the
+    default-weights case above)."""
+    weights_with_explicit_zero = dict(DEFAULT_WEIGHTS, flow_l2=0.0)
+
+    _, loss_dict_default = _run(small_training_fixture, DEFAULT_WEIGHTS)
+    _, loss_dict_explicit = _run(small_training_fixture, weights_with_explicit_zero)
+
+    assert loss_dict_default["total"] == loss_dict_explicit["total"]
+
+
+def test_flow_l2_nonzero_weight_changes_loss(small_training_fixture):
+    weights_with_flow_l2 = dict(DEFAULT_WEIGHTS, flow_l2=1.0)
+
+    _, loss_dict_default = _run(small_training_fixture, DEFAULT_WEIGHTS)
+    _, loss_dict_with_term = _run(small_training_fixture, weights_with_flow_l2)
+
+    assert loss_dict_with_term["total"][0] != pytest.approx(
+        loss_dict_default["total"][0]
+    )

@@ -1,5 +1,11 @@
 from flow_model import FlowModel, model_forward
-from flow_model_training import Datatuple, mask_input, loss_fn, train_model
+from flow_model_training import (
+    Datatuple,
+    extra_weight_filename_suffix,
+    mask_input,
+    loss_fn,
+    train_model,
+)
 
 import os
 import shutil
@@ -23,6 +29,7 @@ parser.add_argument('resolution', type=int, help='model resolution')
 parser.add_argument('--obs_weight', help='Weight on the observation term of the loss', default=1.0, type=float)
 parser.add_argument('--dist_weight', help='Weight on the distance penalty in the loss', default=1e-2, type=float)
 parser.add_argument('--ent_weight', help='Weight on the joint entropy of the model', default=1e-4, type=float)
+parser.add_argument('--flow_l2_weight', help='Weight on the L2 penalty on the flow matrices', default=0.0, type=float)
 parser.add_argument('--dist_pow', help='The exponent of the distance penalty', default=0.4, type=float)
 parser.add_argument("--dont_normalize", action="store_true", help="don't normalize distance matrix")
 parser.add_argument('--learning_rate', help='Learning rate for Adam optimizer', default=0.1, type=float)
@@ -34,8 +41,16 @@ parser.add_argument("--ebirdst_year", help="ebirdst version year for filename co
 args = parser.parse_args()
 print(str(args))
 
+loss_weights = {
+    'obs': args.obs_weight,
+    'dist': args.dist_weight,
+    'ent': args.ent_weight,
+    'flow_l2': args.flow_l2_weight,
+}
+extra_weights_suffix = extra_weight_filename_suffix(loss_weights)
+
 hdf_src = os.path.join(args.root, f'{args.species}_{args.ebirdst_year}_{args.resolution}km.hdf5')
-hdf_dst = os.path.join(args.root, f'{args.species}_{args.ebirdst_year}_{args.resolution}km_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}_pow{args.dist_pow}.hdf5')
+hdf_dst = os.path.join(args.root, f'{args.species}_{args.ebirdst_year}_{args.resolution}km_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}{extra_weights_suffix}_pow{args.dist_pow}.hdf5')
 
 shutil.copyfile(hdf_src, hdf_dst)
 
@@ -62,11 +77,9 @@ optimizer = optax.adam(args.learning_rate)
 # Instantiate loss function
 loss_fn = jit(partial(loss_fn,
                       cells=cells,
-                      true_densities=masked_densities, 
-                      d_matrices=distance_matrices, 
-                      obs_weight=args.obs_weight, 
-                      dist_weight=args.dist_weight,
-                      ent_weight=args.ent_weight))
+                      true_densities=masked_densities,
+                      d_matrices=distance_matrices,
+                      weights=loss_weights))
 
 # Run Training and get params and losses
 params, loss_dict = train_model(loss_fn,
@@ -77,7 +90,7 @@ params, loss_dict = train_model(loss_fn,
                                 key)
 
 if args.save_pkl:
-    with open(os.path.join(args.root, f'{args.species}_params_{args.resolution}_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}_pow{args.dist_pow}.pkl'), 'wb') as f:
+    with open(os.path.join(args.root, f'{args.species}_params_{args.resolution}_obs{args.obs_weight}_ent{args.ent_weight}_dist{args.dist_weight}{extra_weights_suffix}_pow{args.dist_pow}.pkl'), 'wb') as f:
         pickle.dump(params, f)
 
 t_start = 1
@@ -105,9 +118,8 @@ del file['metadata/birdflow_model_date']
 file.create_dataset('metadata/birdflow_model_date', data=str(datetime.today()))
 
 hyper = file.create_group("metadata/hyperparameters")
-hyper.create_dataset('obs_weight', data=args.obs_weight)
-hyper.create_dataset('ent_weight', data=args.ent_weight)
-hyper.create_dataset('dist_weight', data=args.dist_weight)
+for name, weight in loss_weights.items():
+    hyper.create_dataset(f'{name}_weight', data=weight)
 hyper.create_dataset('dist_pow', data=args.dist_pow)
 hyper.create_dataset('learning_rate', data=args.learning_rate)
 hyper.create_dataset('training_steps', data=args.training_steps)
@@ -115,9 +127,7 @@ hyper.create_dataset('rng_seed', data=args.rng_seed)
 hyper.create_dataset('normalized', data=not args.dont_normalize)
 
 loss_vals = file.create_group("metadata/loss_values")
-loss_vals.create_dataset('total', data=loss_dict['total'])
-loss_vals.create_dataset('obs', data=loss_dict['obs'])
-loss_vals.create_dataset('dist', data=loss_dict['dist'])
-loss_vals.create_dataset('ent', data=loss_dict['ent'])
+for name, values in loss_dict.items():
+    loss_vals.create_dataset(name, data=values)
 
 file.close()
