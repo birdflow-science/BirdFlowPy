@@ -312,13 +312,33 @@ added.
 ## `LOSS_TERMS` scale inconsistently with active-cell count, which weakens weight transfer across species
 
 **Found:** 2026-11-20, planning the issue #7 temporal-smoothing term
-(`dev/workplan.md`).
+(`dev/workplan.md`). **Updated:** 2026-11-23, to add the second
+(previously missing) scaling effect below, per the project owner.
 
 `obs_loss`, `distance_loss`, `ent_loss`, and `flow_l2_loss`
 (`flow_model_training.py`) are all unnormalized `jnp.sum`s, but they
 don't scale the same way with a species' active-cell count `C` (which
 at this project's standard fixed 100km resolution varies enormously
-species to species):
+species to species). Two effects pull in opposite directions as `C`
+grows, and this entry previously only covered the first:
+
+1. **More cells, more summed terms** — a bigger `C` means more entries
+   get added into the sum, which on its own would push a term's total
+   up.
+2. **Smaller values per cell/entry** — `obs_loss` and `flow_l2_loss`
+   both operate on *relative* abundance: each week's density sums to
+   ~1 across `C` cells, so *mean* per-cell abundance is `1/C` by
+   construction (not an empirical tendency — a direct consequence of
+   fitting to relative abundance). `flow_l2_loss`'s flow matrix is
+   similarly constrained (its entries sum to ~1 in total across ~`C`×`C`
+   cells), so its mean entry shrinks faster still, ~`1/C²`. This pulls
+   each squared term down as `C` grows, which on its own would push a
+   term's total down. (`ent_loss` also operates on relative abundance,
+   but entropy's `-p·log(p)` doesn't shrink the same way a squared
+   term does — its own distinct cell-count behavior is covered in its
+   bullet below.)
+
+Which effect wins depends on the term:
 
 - **`distance_loss`** — already addressed; this one's scaling was
   fixed previously (not re-verified here, per the project owner).
@@ -328,15 +348,19 @@ species to species):
   in practice.
 - **`obs_loss`** and **`flow_l2_loss`** — both sums of squared entries
   from a vector/matrix that's itself constrained to sum to ~1
-  (density, flow mass). How these scale with `C` depends on whether a
-  species' density stays equally "spread out" relative to its own
-  range as `C` grows (in which case these shrink roughly like `1/C`)
-  or concentrates into a roughly fixed number of hotspot cells
-  regardless of total range size (in which case they stay roughly
-  constant in `C`). Not determinable from the formulas alone — real
-  BirdFlow densities are probably somewhere between the two extremes,
-  and which regime dominates is an open empirical question (see "Note
-  on empirically estimating scaling" below).
+  (density, flow mass). If a species' residuals/flow mass were spread
+  evenly across all `C` cells, the `1/C` (or `1/C²`) mean-value effect
+  above would dominate: each squared term shrinks quadratically while
+  only `C` terms are added, so the total would shrink roughly like
+  `1/C` for `obs_loss` and faster for `flow_l2_loss`. At the other
+  extreme, a species whose real density concentrates into a roughly
+  fixed number of hotspot cells regardless of total range size would
+  see the opposite: growing `C` mostly adds near-zero cells that barely
+  move the sum, so the total stays roughly constant in `C`. Not
+  determinable from the formulas alone — real BirdFlow densities are
+  probably somewhere between the two extremes, and which regime
+  dominates is an open empirical question (see "Note on empirically
+  estimating scaling" below).
 
 This matters because weights aren't always refit per species: the
 project owner confirmed a substantial chunk of species get their loss
