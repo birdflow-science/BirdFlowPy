@@ -10,13 +10,9 @@ This codebase allows for the gpu-accelerated training and use of Birdflow models
 
 ### Dependencies
 
-The code is written in python 3.X and depends on the following libraries:
-* jax
-* haiku
-* optax
-* scipy
-
-It should be up to date with the latest versions of those libraries
+The code is written in python 3.X and depends on `jax`, `haiku`, `optax`,
+and `scipy`. See [`requirements.txt`](requirements.txt) for the pinned
+versions to install.
 
 ### Executing program
 
