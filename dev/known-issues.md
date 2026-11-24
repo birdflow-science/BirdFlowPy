@@ -103,192 +103,62 @@ entry points assume and what the current code actually looks like.
 asking for the specific versions of `jax`/`haiku`/`optax`/`scipy` this
 project needs).
 
-`BirdFlowContainer.def` (the separate repo that builds the production
-image used on Unity) installs `jax[cuda12]`, `flax`, `dm-haiku`,
-`optax`, and `h5py` via plain `pip install --upgrade`, with no version
-pins at all. There is currently no tracked record anywhere of which
-dependency versions BirdFlowPy actually needs or has been tested
-against in production — "whatever pip resolved at the last container
-build" is the only answer, and it silently changes on every rebuild.
+**How the container works today:** `BirdFlowContainer.def` (the
+separate repo that builds the production image used on Unity)
+installs `jax[cuda12]`, `flax`, `dm-haiku`, `optax`, and `h5py` via
+plain `pip install --upgrade`, with no version pins at all. There is
+currently no tracked record anywhere of which dependency versions
+BirdFlowPy actually needs or has been tested against in production —
+"whatever pip resolved at the last container build" is the only
+answer, and it silently changes on every rebuild. `BirdFlowContainer`
+only supplies the shared environment (conda/Python, R, pinned
+libraries) via `BirdFlowContainer.sif`; it does not bake in a copy of
+this repo's code, so code and environment are decoupled per user —
+see `dev/architecture.md`'s "Running on Unity" section.
 
-This repo's original local test environment (`requirements-dev.txt`,
-since removed — see "Update 2026-11-17" below) was pinned, but
-deliberately to an *older*, Python 3.9-compatible stack for local
-development — not verified against, and found to diverge sharply
-from, the actual production environment. Running
-`dev/print_container_versions.sh` (added this session) inside the
-current container on Unity vs. that old local environment gave:
+**How dependencies are now listed:** `requirements.txt` at the repo
+root records the exact versions confirmed installed in the container
+as of 2026-11-17 (captured via `dev/print_container_versions.sh`), as
+the single source of truth for BirdFlowPy's own pinned versions,
+rather than a second, independently drifting file. It's also what
+`.venv-unity` (the documented local dev/test environment — see
+`dev/architecture.md`'s "Tests" section) installs from.
 
-| Package | Old local env (Python 3.9) | Unity container (Python 3.13.9) |
-|---|---|---|
-| jax / jaxlib | 0.4.18 | 0.8.0 |
-| haiku | 0.0.10 | 0.0.15 |
-| optax | 0.1.7 | 0.2.6 |
-| scipy | 1.10.1 | 1.16.2 |
-| h5py | 3.14.0 | 3.15.1 |
-| numpy | 1.26.4 | 2.3.4 |
+**Envisioned change to the container (not yet done):** actually
+repoint `BirdFlowContainer.def` to install Python dependencies *from*
+`requirements.txt` instead of its own inline `pip install --upgrade`
+lines, so the container build itself pins to the same versions this
+repo tracks. Deliberately not done yet, since that requires an actual
+container rebuild, which is out of scope for now.
 
-The numpy divergence was the sharpest: the old environment pinned
-`numpy<2` specifically for Python-3.9 compatibility, while production
-is on numpy 2.3.4. This meant `pluggable-loss-terms`'s golden-value
-regression tests (`tests/test_golden_loss_fn.py`,
-`tests/test_update_hdf_golden.py`) had only ever run against the
-numpy-1.x/jax-0.4/Python-3.9 combination locally, never the
-numpy-2.x/jax-0.8/Python-3.13 combination production actually runs.
-See "Update 2026-11-17" below for how this was resolved.
+**How testing is done with `BirdFlowPipeline`:** `BirdFlowPipeline` (a
+separate R package, not covered by this repo) is what actually drives
+model fitting/evaluation *on Unity specifically*, including launching
+parallel jobs, and it has its own test suite. Per
+`BirdFlowContainer`'s README ("Rebuilding the BirdFlowContainer
+apptainer" step 3), running `devtools::test()` from the
+`BirdFlowPipeline` RStudio project against a freshly built container
+is already the team's standing validation step before trusting a
+rebuild — the closest thing to CI this stack has today, though it's
+manual, Unity-specific, and runs only at rebuild time rather than
+continuously. The project owner confirmed `BirdFlowPipeline`'s suite
+runs full model fits (so it would likely surface a hard dependency
+break mid-fit) but doesn't exercise every BirdFlowPy code path, and
+isn't rigorous about snapshotting fitted output for regressions — so
+it validates dependency bumps/container rebuilds reasonably well, but
+isn't a substitute for this repo's own `tests/` when it comes to
+verifying BirdFlowPy's own changes.
 
-Separately, issue #5's reported error
-(`jax.extend.core.JaxprEqn` missing) looks like a plausible
-haiku/jax internal-API incompatibility at the *current* container's
-versions (haiku 0.0.15 against jax 0.8.0) rather than a user
-environment-setup mistake — worth checking by actually running
-BirdFlowPy's training/fitting path inside the current container,
-since the container as currently built may be broken for model
-fitting regardless of this branch.
-
-### Broader context: why this differs from BirdFlowR, and the existing validation path
-
-Discussed 2026-11-17 with the project owner. BirdFlowR tracks
-latest R/CRAN continuously, validated by its own CI on every PR and
-merge to main — that's viable because CRAN runs reverse-dependency
-checks before a package release ships, catching most breakage before
-it reaches consumers. PyPI has no equivalent gatekeeper: any package
-(jax very much included) can break its own API in a minor version
-with nothing catching it centrally, which is exactly the shape of
-issue #5. BirdFlowPy is also public but far less supported than
-BirdFlowR — the team's actual production use case is fitting and
-releasing models once, which users then consume through BirdFlowR,
-not continuous external development on BirdFlowPy itself. Floating
-dependency versions with no CI (today's state: `BirdFlowContainer.def`
-runs unpinned `pip install --upgrade`) is the one combination that
-doesn't work: no gatekeeper and no validation.
-
-`BirdFlowContainer` is rebuilt rarely (every couple of years, last
-triggered by R falling behind) and shared identically by the whole
-team, so a silent Python dependency change inside a routine rebuild is
-a real risk, not just a tidiness concern.
-
-Important existing piece: **`BirdFlowPipeline`** (a separate R
-package, not covered by this repo) is what actually drives model
-fitting/evaluation *on Unity specifically*, including launching
-parallel jobs, and it has its own test suite. Per `BirdFlowContainer`'s
-README ("Rebuilding the BirdFlowContainer apptainer" step 3), running
-`devtools::test()` from the `BirdFlowPipeline` RStudio project against
-a freshly built container is already the team's standing validation
-step before trusting a rebuild. That makes it the closest thing to CI
-this stack has today — it's just manual, Unity-specific, and runs only
-at rebuild time rather than continuously.
-
-Confirmed 2026-11-17 by the project owner: (1) `BirdFlowPipeline`'s
-suite does **not** exercise this branch's new features (the
-`LOSS_TERMS` registry, `flow_l2`, the new HDF5 output fields) — only
-the pre-registry path. (2) It does run full model fits, so it would
-likely surface a hard dependency break (e.g. issue #5's error) that
-occurs mid-fit; less clear is how rigorously it snapshots/compares
-*fitted model output* across runs, so it's a better bet for "does
-fitting still run at all" than "did the fitted result subtly change."
-This means it validates dependency bumps/container rebuilds
-reasonably well, but isn't a substitute for this branch's own test
-suite (`tests/`) when it comes to verifying the loss-term-registry
-refactor itself.
-
-Given that, and that the project owner is currently the only user of
-this branch's new features (in active development on them, so bugs
-there are expected and tolerable), the stated priority for merging
-`pluggable-loss-terms` is narrower than "fully verified in
-production": don't break the existing (pre-registry) workflow, while
-opening room to develop new loss terms. That's a materially lower bar
-than requiring `BirdFlowPipeline`'s suite to validate the new
-features before merge — it can't, by design, so merge-readiness should
-be judged by `tests/`'s own golden-value regression tests (proving the
-refactor doesn't change pre-existing behavior) rather than waiting on
-`BirdFlowPipeline` coverage that was never going to arrive for this
-branch.
-
-**Fix (not yet applied, needs a decision) — proposed direction:**
-
-1. **Make BirdFlowPy's own pinned versions the single source of
-   truth**, rather than two independently drifting files. Added
-   `requirements.txt` at the repo root (2026-11-17) recording the
-   table above as explicit pins. Still open: actually repointing
-   `BirdFlowContainer.def` to install Python dependencies *from*
-   `requirements.txt` instead of its own inline `pip install --upgrade`
-   lines — deliberately not done yet, since that requires an actual
-   container rebuild, which is out of scope for now.
-2. **Freeze, don't float** — given there's no CI continuously
-   validating BirdFlowPy against new dependency releases, floating
-   buys nothing but risk; pin explicitly and bump only on a concrete
-   trigger (a specific feature need, Unity/CUDA forcing a bump, PyPI
-   dropping wheels for the current Python/CUDA combo) rather than on
-   a schedule. This mirrors how rarely the container is rebuilt today,
-   just makes the version set stable *between* rebuilds too, not only
-   at rebuild time.
-3. **Use `BirdFlowPipeline`'s test suite as the deliberate gate for
-   any pin bump**, not just container rebuilds for R's sake — run
-   `devtools::test()` against the new container before adopting a new
-   pin set, and treat a failure as "don't ship this pin," the same way
-   a BirdFlowR CI failure blocks a merge. Confirm first whether that
-   suite actually covers the loss-term-registry/HDF5 changes on this
-   branch; if not, extending it (or adding a narrower Python-side smoke
-   test) is worth a separate decision.
-4. **Record the resolved version set every time the container is
-   rebuilt** (e.g. commit `dev/print_container_versions.sh`'s output
-   alongside `BirdFlowContainer.def`'s change), so "what did we
-   actually get this time" has a durable record instead of living only
-   in whoever did the rebuild's memory — directly answering requests
-   like issue #5's.
-
-Should also settle whether `pluggable-loss-terms`'s own golden tests
-need regenerating against whatever version set gets pinned
-(floating-point results can shift across jax/numpy versions even
-absent an API break) before this branch is considered verified for
-merge.
-
-### Update 2026-11-17: local environment now matches the container; golden tests regenerated
-
-Installed Python 3.13.18 locally (Homebrew) and created `.venv-unity`,
-`pip install -r requirements.txt pytest` — every package resolved to
-exactly the version pinned above, i.e. nothing in `requirements.txt`'s
-pin set conflicts with what's actually installable today. Ran
-`tests/` under `.venv-unity`: no import or API error (unlike issue
-#5's report) — `tests/test_loss_terms.py`'s hand-computed unit tests
-(no RNG) passed unchanged, but the three golden-value/snapshot tests
-(`test_golden_loss_dict`, `test_golden_fitted_params`,
-`test_update_hdf_golden_output`) failed, with numeric divergences too
-large to be rounding (e.g. a sign flip in a fitted parameter).
-
-Cross-checked via a `git worktree` at commit `dce4646` (the last
-commit before the `LOSS_TERMS` registry refactor, predating this
-branch entirely) running the same golden-value tests under
-`.venv-unity`: identical failure pattern. This confirms the
-divergence is RNG/dependency drift between jax 0.4.18 and 0.8.0 (most
-likely jax's PRNG stream implementation, used by
-`hk.initializers.RandomNormal()`), not anything introduced by the
-registry refactor. Regenerated the golden values in
-`tests/test_golden_loss_fn.py` and `tests/test_update_hdf_golden.py`
-against `.venv-unity`; full suite (17 tests) now passes under
-`.venv-unity`.
-
-Per the project owner's decision, dropped the old local dev
-environment entirely rather than keeping both: deleted
-`requirements-dev.txt` and `.venv/`, added `.venv-unity` to
-`.gitignore`. `.venv-unity`/`requirements.txt` is now the only
-documented local dev/test environment (see `dev/architecture.md`'s
-"Tests" section) — it can no longer run the now-stale old golden
-values (that environment doesn't exist anymore), which is fine since
-it was superseded rather than kept as an alternative.
-
-### Update 2026-11-17 (later): confirmed directly inside BirdFlowContainer on Unity
-
-Project owner ran `tests/` from an RStudio OnDemand terminal, i.e.
-directly inside `BirdFlowContainer.sif` rather than the local
-`.venv-unity` approximation: all 17 tests passed. This confirms
-`requirements.txt`'s pins genuinely match the container (not just a
-best-effort guess from `print_container_versions.sh`'s output) and
-that the regenerated golden values hold in the real production
-environment. Also ran `BirdFlowPipeline`'s suite against this branch
-(point 3 of the proposed direction below): passed. See
-`dev/worklog.md`'s "Verified on Unity" entry for the full writeup.
+**Fix (not yet applied, needs a decision):** use `BirdFlowPipeline`'s
+test suite as the deliberate gate for any pin bump, not just container
+rebuilds for R's sake — run `devtools::test()` against the new
+container before adopting a new pin set, and treat a failure as "don't
+ship this pin." Also worth deciding: whether to record the resolved
+version set every time the container is rebuilt (e.g. commit
+`dev/print_container_versions.sh`'s output alongside
+`BirdFlowContainer.def`'s change), so "what did we actually get this
+time" has a durable record instead of living only in whoever did the
+rebuild's memory.
 
 ## Record the package version in HDF5 output metadata
 
@@ -314,29 +184,33 @@ added.
 **Found:** 2026-11-20, planning the issue #7 temporal-smoothing term
 (`dev/workplan.md`). **Updated:** 2026-11-23, to add the second
 (previously missing) scaling effect below, per the project owner.
+**Updated:** 2026-11-23 (later), to fold `smooth_loss` into the main
+discussion now that it's implemented rather than prospective, and to
+note `flow_l2_loss`'s lower practical priority as a dummy term.
 
-`obs_loss`, `distance_loss`, `ent_loss`, and `flow_l2_loss`
-(`flow_model_training.py`) are all unnormalized `jnp.sum`s, but they
-don't scale the same way with a species' active-cell count `C` (which
-at this project's standard fixed 100km resolution varies enormously
-species to species). Two effects pull in opposite directions as `C`
-grows, and this entry previously only covered the first:
+`obs_loss`, `distance_loss`, `ent_loss`, `flow_l2_loss`, and
+`smooth_loss` (`flow_model_training.py`) are all unnormalized
+`jnp.sum`s, but they don't scale the same way with a species'
+active-cell count `C` (which at this project's standard fixed 100km
+resolution varies enormously species to species). Two effects pull in
+opposite directions as `C` grows, and this entry previously only
+covered the first:
 
 1. **More cells, more summed terms** — a bigger `C` means more entries
    get added into the sum, which on its own would push a term's total
    up.
-2. **Smaller values per cell/entry** — `obs_loss` and `flow_l2_loss`
-   both operate on *relative* abundance: each week's density sums to
-   ~1 across `C` cells, so *mean* per-cell abundance is `1/C` by
-   construction (not an empirical tendency — a direct consequence of
-   fitting to relative abundance). `flow_l2_loss`'s flow matrix is
-   similarly constrained (its entries sum to ~1 in total across ~`C`×`C`
-   cells), so its mean entry shrinks faster still, ~`1/C²`. This pulls
-   each squared term down as `C` grows, which on its own would push a
-   term's total down. (`ent_loss` also operates on relative abundance,
-   but entropy's `-p·log(p)` doesn't shrink the same way a squared
-   term does — its own distinct cell-count behavior is covered in its
-   bullet below.)
+2. **Smaller values per cell/entry** — `obs_loss`, `flow_l2_loss`, and
+   `smooth_loss` all operate on *relative* abundance: each week's
+   density sums to ~1 across `C` cells, so *mean* per-cell abundance
+   is `1/C` by construction (not an empirical tendency — a direct
+   consequence of fitting to relative abundance). `flow_l2_loss`'s
+   flow matrix is similarly constrained (its entries sum to ~1 in
+   total across ~`C`×`C` cells), so its mean entry shrinks faster
+   still, ~`1/C²`. This pulls each squared term down as `C` grows,
+   which on its own would push a term's total down. (`ent_loss` also
+   operates on relative abundance, but entropy's `-p·log(p)` doesn't
+   shrink the same way a squared term does — its own distinct
+   cell-count behavior is covered in its bullet below.)
 
 Which effect wins depends on the term:
 
@@ -344,23 +218,31 @@ Which effect wins depends on the term:
   fixed previously (not re-verified here, per the project owner).
 - **`ent_loss`** — bounded by `log(C)`, since entropy of a
   distribution over `C` cells can't exceed `log(C)`. Logarithmic, not
-  linear — the mildest of the four, already close to self-normalizing
-  in practice.
-- **`obs_loss`** and **`flow_l2_loss`** — both sums of squared entries
-  from a vector/matrix that's itself constrained to sum to ~1
-  (density, flow mass). If a species' residuals/flow mass were spread
-  evenly across all `C` cells, the `1/C` (or `1/C²`) mean-value effect
-  above would dominate: each squared term shrinks quadratically while
-  only `C` terms are added, so the total would shrink roughly like
-  `1/C` for `obs_loss` and faster for `flow_l2_loss`. At the other
-  extreme, a species whose real density concentrates into a roughly
-  fixed number of hotspot cells regardless of total range size would
-  see the opposite: growing `C` mostly adds near-zero cells that barely
-  move the sum, so the total stays roughly constant in `C`. Not
-  determinable from the formulas alone — real BirdFlow densities are
-  probably somewhere between the two extremes, and which regime
-  dominates is an open empirical question (see "Note on empirically
-  estimating scaling" below).
+  linear — the mildest of the terms below, already close to
+  self-normalizing in practice.
+- **`obs_loss`**, **`flow_l2_loss`**, and **`smooth_loss`** — all sums
+  of squared entries from a vector/matrix that's itself constrained to
+  sum to ~1 (density, flow mass, or — for `smooth_loss` — a second
+  difference of density, which inherits the same `1/C`-scale from the
+  densities it's built from). If a species' residuals/flow mass/
+  curvature were spread evenly across all `C` cells, the `1/C` (or
+  `1/C²`) mean-value effect above would dominate: each squared term
+  shrinks quadratically while only `C` (or, for `smooth_loss`, `C`
+  times the number of interior weeks) terms are added, so the total
+  would shrink roughly like `1/C` for `obs_loss`/`smooth_loss` and
+  faster for `flow_l2_loss`. At the other extreme, a species whose
+  real density concentrates into a roughly fixed number of hotspot
+  cells regardless of total range size would see the opposite:
+  growing `C` mostly adds near-zero cells that barely move the sum,
+  so the total stays roughly constant in `C`. Not determinable from
+  the formulas alone — real BirdFlow densities are probably somewhere
+  between the two extremes, and which regime dominates is an open
+  empirical question (see "Note on empirically estimating scaling"
+  below). Of these three, `flow_l2_loss` is lowest priority to
+  actually resolve: it's a dummy term added only to exercise the
+  `LOSS_TERMS` registry mechanism (see `dev/architecture.md`), not one
+  in scientific use, so its scaling behavior has no practical
+  consequence today.
 
 This matters because weights aren't always refit per species: the
 project owner confirmed a substantial chunk of species get their loss
@@ -370,33 +252,26 @@ term it multiplies means roughly the same thing (same effective
 strength) on both species — which isn't guaranteed when a term's raw
 magnitude depends on `C` in an uncontrolled way.
 
-The new `smooth_loss` term being added for issue #7 (a sum of squared
-second differences on a density-shaped vector — the same mathematical
-family as `obs_loss`/`flow_l2_loss`) is, for now, **also left
-unnormalized** (raw `jnp.sum`), explicitly deferring the earlier plan
-to normalize it by `T * total_cells`. Reasoning: since `smooth_loss`
-is in the same family as `obs_loss`, it likely scales with `C`
-similarly to `obs_loss` — and `obs_loss` is the term `smooth_loss`
-most directly competes against in the objective. Normalizing only
-`smooth_loss` while leaving `obs_loss` raw could decouple their
-relative scaling and make the obs/smooth *ratio* (which is what
-actually governs the fitted model's smoothness-vs-fidelity tradeoff)
-transfer worse across species, not better. What matters for transfer
-is that ratio staying stable across species, not any single term
-being independently cell-count-invariant. See
-`dev/workplan.md` for the fuller discussion.
-
 **Fix (not yet applied, needs a decision, and needs the empirical
 question above answered first):** once the actual scaling behavior of
-`obs_loss`/`ent_loss`/`flow_l2_loss` (and prospectively `smooth_loss`)
-is known, decide whether to normalize some or all of them together
-for consistency and better transfer behavior. Doing this for any one
-of them in isolation risks making things worse, per the reasoning
-above — if it happens, it should happen as one coordinated change
-across all the same-family terms. This would also be a breaking
-change to the meaning of existing `obs_weight`/`ent_weight`/
-`flow_l2_weight` values and would require re-deriving or re-fitting
-weights for every species currently using transferred values.
+`obs_loss`/`ent_loss`/`smooth_loss` (and, lower priority,
+`flow_l2_loss`) is known, decide whether to normalize some or all of
+them together for consistency and better transfer behavior. Doing
+this for any one of them in isolation risks making things worse — for
+example, `smooth_loss` is in the same family as `obs_loss` and
+competes against it directly in the objective, so normalizing
+`smooth_loss` alone while leaving `obs_loss` raw could decouple their
+relative scaling and make the obs/smooth *ratio* (which is what
+actually governs the fitted model's smoothness-vs-fidelity tradeoff)
+transfer worse across species, not better — so if a fix happens, it
+should happen as one coordinated change across all the same-family
+terms, not piecemeal. This would also be a breaking change to the
+meaning of existing `obs_weight`/`ent_weight`/`flow_l2_weight`/
+`smooth_weight` values and would require re-deriving or re-fitting
+weights for every species currently using transferred values. (This
+is why `smooth_loss` was deliberately left unnormalized rather than
+implementing an earlier plan to normalize it by `T * total_cells` —
+see `dev/workplan.md` for that fuller discussion.)
 
 **Note on empirically estimating scaling:** the project has a large
 trove of existing grid-search output with performance metrics per
@@ -406,7 +281,10 @@ directly to estimate how `obs_loss`/`ent_loss`/`flow_l2_loss` actually
 scale with `C` in practice, rather than reasoning about it from the
 loss formulas alone — turning the open empirical question above into
 a concrete analysis rather than a guess, before committing to any
-normalization change.
+normalization change. `smooth_loss` didn't exist when that historical
+grid-search data was generated, so its own scaling would need to be
+estimated separately (e.g. by computing it post hoc from those same
+fitted models' marginals, or from new runs).
 
 ## `smooth_loss` treats absence and insufficient data as the same "true zero"
 
@@ -417,29 +295,40 @@ term (`dev/workplan.md`, `dev/architecture.md`).
 marginal into the full canonical cell space via that week's
 `dynamic_mask`, treating any cell outside the mask as **true zero**
 density for that week. Per the project owner, a cell can land outside
-a week's `dynamic_mask` for two different reasons that the mask alone
+a week's `dynamic_mask` for three different reasons that the mask alone
 doesn't distinguish:
 
-1. The underlying eBird S&T model predicted (near-)zero density there,
-   or the location is simply unsuitable for the species (e.g. ocean for
-   a forest bird) — genuinely zero, confidently.
+1. The underlying eBird S&T model predicted (near-)zero density there
+   — a known true zero.
 2. eBird S&T didn't have enough data to make a prediction at all (the
    owner's example: much of the Amazon basin) — unknown, not zero,
    even though it's recorded the same way as case 1 today.
+3. The location is simply unsuitable for the species (e.g. ocean for
+   a forest bird) — genuinely zero, but conflated with case 2 in the
+   eBird output.
 
 The project is aware of this distinction (it now tracks whether a
 model made a prediction at all, separately from the prediction's
-value) but `smooth_loss` doesn't use that finer-grained information —
+value), which allows identifying case 1 zeros, but doesn't resolve
+whether a missing prediction is case 2 or case 3.
+
+`smooth_loss` doesn't use that finer-grained information —
 it was deliberately built simple first, per the owner's explicit
-direction, with true-zero for both cases as the starting point.
+direction, with true-zero for all three cases as the starting point.
 
 **Fix (not yet applied, needs a decision):** the owner floated that
-`smooth_loss` could instead help *impute* case-2 gaps — e.g. by
-treating unknown-cell curvature as unconstrained (no penalty either
-way) rather than penalizing it against an assumed zero, or by letting
-the smoothness term itself interpolate a plausible value for a
-cell that's missing one week but present on either side. This would
-need the finer-grained "did the model run here at all" signal plumbed
-through from the HDF5 into `smooth_loss` (currently only the single
-boolean `dynamic_mask` is passed in), and a decision on the specific
-mechanism, before implementing.
+`smooth_loss` could instead help *impute* the no-prediction cells
+(cases 2 and 3) — e.g. by treating their curvature as unconstrained
+(no penalty either way) rather than penalizing it against an assumed
+zero, or by letting the smoothness term itself interpolate a plausible
+value for a cell that's missing one week but present on either side.
+Complicated by the fact that cases 2 and 3 aren't currently
+distinguishable from each other (both just show up as "no prediction
+made"), and only case 3 is actually a candidate for imputation —
+case-2 cells are genuinely unknown, not quantities to be inferred. The
+owner's intuition is that `smooth_loss` itself might still have useful
+information to bring to bear here despite that ambiguity, but working
+out how isn't being pursued now. Any fix would need the finer-grained
+"did the model run here at all" signal plumbed through from the HDF5
+into `smooth_loss` (currently only the single boolean `dynamic_mask`
+is passed in) at minimum, on top of resolving the above.
